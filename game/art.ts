@@ -23,7 +23,12 @@ function hull(name: string, stations: Station[]): void {
             ab[0] * ac[1] - ab[1] * ac[0],
         ];
         const length = Math.hypot(...n);
-        for (const p of [a, b, c]) verts.push(...p, n[0] / length, n[1] / length, n[2] / length, 0, 0);
+        // Project both colours onto one hull so the outer flame cannot cover its red core.
+        for (const p of [a, b, c]) {
+            const u = 0.5 + p[0] * 3.1;
+            const v = 0.015 + (p[2] + 0.01) * 0.96;
+            verts.push(...p, n[0] / length, n[1] / length, n[2] / length, u, v);
+        }
     }
     for (let row = 1; row < rings.length; row++) {
         const front = rings[row - 1],
@@ -49,6 +54,33 @@ export function makeArt(): void {
         [0.38, 0.105, -0.065, 0.065],
         [1, 0.006, -0.008, 0.008],
     ]);
+    game.paint(
+        'jet-flame',
+        64,
+        128,
+        (c) => {
+            const plume = c.createLinearGradient(0, 0, 0, 128);
+            plume.addColorStop(0, '#9ef6ff');
+            plume.addColorStop(0.4, '#21d9ff');
+            plume.addColorStop(1, '#009eff');
+            c.fillStyle = plume;
+            c.fillRect(0, 0, 64, 128);
+
+            const core = c.createLinearGradient(0, 0, 0, 94);
+            core.addColorStop(0, '#ff775b');
+            core.addColorStop(0.22, '#ff3d39');
+            core.addColorStop(0.8, '#ed263f');
+            core.addColorStop(1, '#ed263f00');
+            c.fillStyle = core;
+            c.beginPath();
+            c.moveTo(20, 0);
+            c.quadraticCurveTo(13, 34, 32, 94);
+            c.quadraticCurveTo(51, 34, 44, 0);
+            c.closePath();
+            c.fill();
+        },
+        { res: 1 },
+    );
     game.paint(
         'daylight',
         720,

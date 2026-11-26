@@ -1,32 +1,25 @@
-import { game, type Mesh } from './engine.js';
+import { game } from './engine.js';
 
 export const CRAFT_WIDTH = 2;
-type Part = { obj: Mesh; x: number; y: number; z: number };
 const HOVER = 0.58;
 const BANK_LIMIT = 0.19;
+const EXHAUST_Y = -0.222;
 export function spawnVehicle(night: boolean) {
-    const parts: Part[] = [];
-    function part(
-        id: string,
-        mesh: string,
-        x: number,
-        y: number,
-        z: number,
-        color: string,
-        size: [number, number, number] = [1, 1, 1],
-        jet = false,
-    ) {
-        const obj = game.spawn({ id, mesh, x, y: y + HOVER, z, color, size, rough: 0.58, unlit: jet });
-        parts.push({ obj, x, y, z });
-        return obj;
-    }
     const craft = game.modelFiles.spawn('kestrel', { id: 'craft', size: 4.13, y: HOVER });
-    for (const side of [-1, 1]) {
+    const exhausts = [-1, 1].map((side) => {
         const x = side * 0.56;
-        const plume = part('exhaust' + side, 'jet', x, -0.222, 1.965, '#00e1ff', [1, 1, 1], true);
-        plume.alpha = 0.63;
-        part('exhaust-core' + side, 'jet', x, -0.19, 1.965, '#e80707', [0.6, 0.48, 1], true);
-    }
+        const obj = game.spawn({
+            id: 'exhaust' + side,
+            mesh: 'jet',
+            x,
+            y: EXHAUST_Y + HOVER,
+            z: 1.965,
+            unlit: true,
+            texture: 'jet-flame',
+            alpha: 0.9,
+        });
+        return { obj, x };
+    });
     const shadow = game.spawn({
         id: 'hover-shadow',
         mesh: 'cylinder',
@@ -49,14 +42,12 @@ export function spawnVehicle(night: boolean) {
         craft.y = lift;
         craft.roll = bank;
         shadow.x = x;
-        for (const p of parts) {
-            p.obj.x = x + c * p.x - s * p.y;
-            p.obj.y = lift + s * p.x + c * p.y;
-            p.obj.roll = bank;
-            if (p.obj.id.startsWith('exhaust')) {
-                const length = 0.09 + throttle * (0.86 + 0.08 * Math.sin(seconds * 32));
-                p.obj.sz = p.obj.id.startsWith('exhaust-core') ? length * 0.66 : length;
-            }
+        const length = 0.09 + throttle * (0.86 + 0.08 * Math.sin(seconds * 32));
+        for (const jet of exhausts) {
+            jet.obj.x = x + c * jet.x - s * EXHAUST_Y;
+            jet.obj.y = lift + s * jet.x + c * EXHAUST_Y;
+            jet.obj.roll = bank;
+            jet.obj.sz = length;
         }
     };
 }
