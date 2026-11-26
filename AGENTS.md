@@ -196,3 +196,18 @@ review page shows which were made:
 npm run -s publish -- "Change 1: done — the jump is higher and lands sooner
 Change 2: not done — the level select needs a design for the locked levels"
 ```
+
+## Rules for this repository (read before you start)
+
+This project keeps its own rules outside this brief. **Before any work** — reading code, editing,
+building, modelling an asset, or answering a question about the project — read these, whole, in order:
+
+1. `docs/rules/architecture_rules.md` — the architecture layers (Data / Game Logic / View / Input /
+   UI / Save-Load / Utils) and what is forbidden.
+2. `docs/rules/pipelines/asset_modeling.md` — how an asset is made and delivered (`.glb`, budgets,
+   what the loader refuses, the QA gate).
+3. `game/README.md` and `game/NOTES.md` — the code's shape, the debug controls, how to test.
+
+They take priority over habits and patterns from elsewhere. If a rule blocks the task, say so
+plainly instead of working around it silently. If a file is missing, say it is missing — never
+invent its contents. When you report back, name the files you read.
