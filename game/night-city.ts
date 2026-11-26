@@ -1,14 +1,19 @@
 import { game, type Mesh } from './engine.js';
 import { SECTION, SECTION_COUNT, ROAD_WIDTH } from './highway.js';
-import { NAMES, NEON, NIGHT_HAZE } from './night-art.js';
+import { NAMES, NIGHT_HAZE, signFrames, streetFrames } from './night-art.js';
 import { routeAt } from './route.js';
 
 const HALF = ROAD_WIDTH / 2,
     WALK = 2.8,
     CURB = 0.15,
     STEP = 4;
+const SIGN_LOD_DISTANCES = [47, 88, 149];
+const ROAD_LOD_DISTANCES = [36, 76];
+const PAVING_LOD_DISTANCES = [33, 67];
+const FACADE_LOD_DISTANCES = [46, 97];
+const BRIDGE_LOD_DISTANCES = [62, 120];
 type Pose = ReturnType<typeof routeAt>;
-type Piece = { obj: Mesh; x: number; z: number; yaw: number };
+type Piece = { obj: Mesh; x: number; z: number; yaw: number; textures?: number[]; thresholds?: number[] };
 type Slot = { logical: number; used: number; pieces: Piece[] };
 type Vertex = [number, number, number, number, number, number, number, number];
 const BASES = ['#253341', '#332b3c', '#27303a', '#303143', '#272d40', '#263a41'];
@@ -19,6 +24,22 @@ function mix(n: number) {
     let x = Math.imul(n ^ 0x3f1354e, 0x45d9f3b);
     x = Math.imul(x ^ (x >>> 16), 0x45d9f3b);
     return (x ^ (x >>> 16)) >>> 0;
+}
+
+function defineCladBox(name: string, face: 'walls' | 'front' | 'sides', flatV: number, bottomV = flatV) {
+    const primitive = game.world3d.meshVerts(game.world3d.mesh('box'));
+    if (!primitive) throw new Error('The box mesh is missing');
+    const box = primitive.slice();
+    for (let vertex = 0; vertex < box.length; vertex += 8) {
+        const nx = box[vertex + 3],
+            ny = box[vertex + 4],
+            nz = box[vertex + 5];
+        const textured = face === 'walls' ? ny === 0 : face === 'front' ? nz !== 0 : nx !== 0;
+        if (textured) continue;
+        box[vertex + 6] = 0.5;
+        box[vertex + 7] = ny < 0 ? bottomV : flatV;
+    }
+    game.world3d.defineMesh(name, box);
 }
 function ribbon(slot: number, logical: number, origin: Pose) {
     const deck: number[] = [],
@@ -77,7 +98,7 @@ function dress(slot: Slot, index: number, logical: number) {
         h: number,
         d: number,
         color: string,
-        texture?: string,
+        texture?: string | number,
         yaw = 0,
         mesh = 'box',
         visible = true,
@@ -89,7 +110,7 @@ function dress(slot: Slot, index: number, logical: number) {
             const obj = game.spawn({
                 id: 'night-' + index + '-' + name + '-' + id,
                 mesh,
-                unlit: !!texture,
+                unlit: texture !== undefined,
                 rough: 0.85,
             });
             piece = { obj, x: 0, z: 0, yaw: 0 };
@@ -105,10 +126,16 @@ function dress(slot: Slot, index: number, logical: number) {
         o.sz = d;
         o.tint = color;
         o.visible = visible;
-        if (texture) o.frame = game.assets.frame(texture).index;
+        if (typeof texture === 'string') {
+            piece.textures = streetFrames.get(texture);
+            piece.thresholds = FACADE_LOD_DISTANCES;
+            o.frame = piece.textures?.[0] ?? game.assets.frame(texture).index;
+        } else if (texture !== undefined) {
+            o.frame = texture;
+        }
         return piece;
     }
-    function surface(name: string, texture?: string) {
+    function surface(name: string, texture?: string, thresholds?: number[]) {
         const piece = place(
             name,
             0,
@@ -123,15 +150,15 @@ function dress(slot: Slot, index: number, logical: number) {
             'night-' + name + index,
         );
         piece.yaw = 0; // Ribbon vertices already include the tangent at every sample.
+        piece.thresholds = thresholds;
     }
     const styles = [mix(logical * 2) % NAMES.length, mix(logical * 2 + 1) % NAMES.length];
-    surface('deck', 'wet-' + (styles[0] % 3) + '-' + (styles[1] % 3));
-    surface('paving', 'night-paving');
+    surface('deck', 'wet-' + (styles[0] % 3) + '-' + (styles[1] % 3), ROAD_LOD_DISTANCES);
+    surface('paving', 'night-paving', PAVING_LOD_DISTANCES);
     surface('curb');
     for (const side of [-1, 1]) {
         const style = styles[(side + 1) / 2],
-            seed = mix(logical * 53 + side * 293),
-            tint = NEON[style % 3];
+            seed = mix(logical * 53 + side * 293);
         const near = side * (HALF + WALK),
             height = 10 + (seed % 31);
         const width = 7 + ((seed >>> 8) % 6),
@@ -140,11 +167,23 @@ function dress(slot: Slot, index: number, logical: number) {
             windows = 'night-windows-' + style;
         // The long ground-floor texture faces the sidewalk. A second, street-facing
         // return and projecting sign catch the eye from the low chase camera.
-        place('shop-block', 0, bx, 2.12, width, 4.24, 20.8, '#ffffff', shop);
+        place('shop-block', 0, bx, 2.12, width, 4.24, 20.8, '#ffffff', shop, 0, 'night-shop-shell');
         const frontage = style % 3;
         const canopyLength = [18.8, 9.6, 5.4][frontage];
         place('canopy', 0, near - side * 0.4, 3.65, 1.05, 0.32, canopyLength, '#354052');
-        place('fascia', 0, near - side * 0.9, 3.56, 0.065, 0.1, canopyLength - 0.6, tint);
+        place(
+            'fascia',
+            0,
+            near - side * 0.96,
+            3.56,
+            0.075,
+            0.23,
+            canopyLength - 0.6,
+            '#ffffff',
+            'night-fascia-' + frontage,
+            0,
+            'night-fascia-shell',
+        );
         const variation = (seed >>> 12) % 5;
         const setback = [1.2, 2.8, 1.6][frontage];
         place(
@@ -204,7 +243,7 @@ function dress(slot: Slot, index: number, logical: number) {
             0.22,
             '#465062',
         );
-        place(
+        const marquee = place(
             'marquee',
             0,
             near - side * 0.95,
@@ -213,9 +252,11 @@ function dress(slot: Slot, index: number, logical: number) {
             signHeight,
             0.27,
             '#ffffff',
-            'night-sign-' + style,
+            signFrames[style][0],
             side * 0.1,
         );
+        marquee.textures = signFrames[style];
+        marquee.thresholds = SIGN_LOD_DISTANCES;
         place(
             'duct',
             -6,
@@ -271,11 +312,28 @@ function dress(slot: Slot, index: number, logical: number) {
         place('rear-block', 0, side * 39, -0.18, 62, 0.32, 27, '#202032');
     }
     const bridge = mod(logical, 9) === 4;
-    place('skybridge', 0, 0, 8.6, 23, 1.6, 1.8, '#ffffff', 'night-crossing', 0, 'box', bridge);
-    place('bridge-strip', 0.01, 0, 8, 21, 0.1, 1.87, '#64b1c2', undefined, 0, 'box', bridge);
+    const crossing = place(
+        'skybridge',
+        0,
+        0,
+        8.6,
+        23,
+        1.6,
+        1.8,
+        '#ffffff',
+        'night-crossing',
+        0,
+        'night-crossing-shell',
+        bridge,
+    );
+    crossing.thresholds = BRIDGE_LOD_DISTANCES;
 }
 
 export function buildNightCity() {
+    // Sample opaque paint for caps and undersides, and reserve the patterned UVs for vertical panels.
+    defineCladBox('night-crossing-shell', 'front', 2 / 64, 53 / 64);
+    defineCladBox('night-shop-shell', 'walls', 189 / 192);
+    defineCladBox('night-fascia-shell', 'sides', 0.5 / 16);
     game.background.picture('night-sky', 'stretch');
     game.render3d.lighting.preset('night');
     game.render3d.lighting.set({
@@ -295,6 +353,7 @@ export function buildNightCity() {
     return (distance: number) => {
         const here = routeAt(distance),
             first = Math.floor(distance / SECTION) - 1;
+        const eye = game.world3d.camera.eye;
         for (let j = 0; j < pool.length; j++) {
             const logical = first + j,
                 index = mod(logical, SECTION_COUNT),
@@ -307,6 +366,13 @@ export function buildNightCity() {
                 p.obj.x = dx * here.cos + dz * here.sin;
                 p.obj.z = -dx * here.sin + dz * here.cos;
                 p.obj.yaw = p.yaw - here.heading;
+                if (p.textures && p.thresholds) {
+                    let viewingDistance = Math.hypot(p.obj.x - eye.x, p.obj.y - eye.y, p.obj.z - eye.z);
+                    if (p.thresholds === SIGN_LOD_DISTANCES) viewingDistance *= 1.24 / p.obj.sx;
+                    let level = 0;
+                    while (level < p.thresholds.length && viewingDistance >= p.thresholds[level]) level++;
+                    p.obj.frame = p.textures[level];
+                }
                 if (recycle) p.obj.snap();
             }
         }

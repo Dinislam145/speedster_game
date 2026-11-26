@@ -4,6 +4,26 @@ type Brush = Parameters<Parameters<typeof game.paint>[3]>[0];
 export const NEON = ['#57d6e3', '#ee60a8', '#ffb566', '#aeff00', '#00ac4a', '#ff0000'];
 export const NAMES = ['SORA', 'LOOP', 'KILO', 'VELA', 'AXON', 'NOVA'];
 const SHOP_TYPES = ['OPTICS', 'TRANSIT', 'WORKS', 'RADIO', 'SYSTEMS', 'HOTEL'];
+const SIGN_WIDTH = 128;
+const SIGN_HEIGHT = 384;
+const SIGN_LEVELS = [
+    { res: 1, borderPixels: 3, opacity: 1 },
+    { res: 0.375, borderPixels: 2.25, opacity: 0.91 },
+    { res: 0.1875, borderPixels: 2, opacity: 0.82 },
+    { res: 0.09375, borderPixels: 1.25, opacity: 0.58 },
+];
+export const signFrames: number[][] = [];
+export const streetFrames = new Map<string, number[]>();
+const SURFACE_SCALES = [
+    [1, 1],
+    [0.5, 0.25],
+    [0.25, 0.125],
+] as const;
+const FACADE_SCALES = [
+    [1, 1],
+    [0.25, 0.5],
+    [0.125, 0.25],
+] as const;
 const W = 384,
     H = 768;
 export const NIGHT_HAZE = '#0b081a';
@@ -13,13 +33,10 @@ function noise(seed: number) {
         return seed / 4294967296;
     };
 }
-function sign(c: Brush, k: number) {
+function sign(c: OffscreenCanvasRenderingContext2D, k: number) {
     const hue = NEON[k % 6];
     c.fillStyle = '#111425';
-    c.fillRect(0, 0, 128, 384);
-    c.strokeStyle = hue;
-    c.lineWidth = 3;
-    c.strokeRect(6, 6, 116, 372);
+    c.fillRect(0, 0, SIGN_WIDTH, SIGN_HEIGHT);
     c.fillStyle = hue;
     c.fillRect(12, 12, 104, 54);
     c.fillStyle = '#1c1524';
@@ -33,6 +50,34 @@ function sign(c: Brush, k: number) {
     c.font = 'bold 13px Arial';
     c.fillText(SHOP_TYPES[k], 64, 351);
     for (let j = 0; j < 8; j++) c.fillRect(23 + j * 11, 361, 6, 5);
+}
+
+function prepareSign(style: number): number[] {
+    // Average the artwork before it goes into the mesh atlas, which has no mip levels.
+    const source =
+        typeof OffscreenCanvas === 'undefined' ? null : new OffscreenCanvas(SIGN_WIDTH, SIGN_HEIGHT);
+    const brush = source?.getContext('2d');
+    if (brush) sign(brush, style);
+    return SIGN_LEVELS.map(({ res, borderPixels, opacity }, level) =>
+        game.paint(
+            'night-sign-' + style + '-' + level,
+            SIGN_WIDTH,
+            SIGN_HEIGHT,
+            (c) => {
+                if (!source) return;
+                c.imageSmoothingEnabled = true;
+                c.imageSmoothingQuality = 'high';
+                c.drawImage(source, 0, 0);
+                // Keep a continuous border in the smaller textures after filtering the lettering.
+                c.lineWidth = borderPixels / res;
+                const inset = Math.max(6, c.lineWidth / 2 + 0.5 / res);
+                c.strokeStyle = NEON[style];
+                c.globalAlpha = opacity;
+                c.strokeRect(inset, inset, SIGN_WIDTH - inset * 2, SIGN_HEIGHT - inset * 2);
+            },
+            { res },
+        ),
+    );
 }
 function windows(c: Brush, k: number) {
     const rand = noise(932 + k * 191);
@@ -92,7 +137,6 @@ function shop(c: Brush, k: number) {
     c.fillStyle = light;
     c.font = 'bold 26px Arial';
     c.fillText(NAMES[k] + '   /   ' + SHOP_TYPES[k], 25, 44);
-    c.fillRect(14, 53, 484, 3);
     for (let i = 0; i < 5; i++) {
         const x = 16 + i * 96;
         c.fillStyle = type === 1 ? '#343745' : '#303f50';
@@ -181,6 +225,12 @@ function road(c: Brush, left: number, right: number) {
         c.fillStyle = i % 3 ? '#d2e6ff09' : '#02071925';
         c.fillRect(rand() * W, rand() * H, 1 + rand() * 3, 1 + rand() * 6);
     }
+}
+
+// Keep the lane cores distinct after filtering the asphalt and its reflections.
+function roadMarkings(c: Brush, left: number, right: number, level: number) {
+    const coreWidth = [3.52, 4.2, 6.2][level];
+    const edgeWidth = [2.6, 3.1, 4.8][level];
     for (const side of [-1, 1]) {
         const x = W / 2 + (side * W) / 6;
         for (let i = 0; i < 3; i++) {
@@ -189,15 +239,17 @@ function road(c: Brush, left: number, right: number) {
             c.save();
             c.shadowColor = '#8cceff';
             c.shadowBlur = 6;
-            c.fillStyle = '#ddf5ff';
-            c.fillRect(x - 1.76, y - h / 2, 3.52, h);
+            c.fillStyle = ['#ddf5ff', '#dbf2fbea', '#c9e6f4c9'][level];
+            c.fillRect(x - coreWidth / 2, y - h / 2, coreWidth, h);
             c.restore();
-            c.fillStyle = '#f2fcff';
-            c.fillRect(x - 0.8, y - h / 2, 1.6, h);
+            if (level === 0) {
+                c.fillStyle = '#f2fcff';
+                c.fillRect(x - 0.8, y - h / 2, 1.6, h);
+            }
         }
         const edge = W / 2 + side * (W / 2 - 6);
-        c.fillStyle = '#47aab4';
-        c.fillRect(edge - 1.3, 0, 2.6, H);
+        c.fillStyle = ['#47aab4', '#47aab4dd', '#47aab4b6'][level];
+        c.fillRect(edge - edgeWidth / 2, 0, edgeWidth, H);
         c.fillStyle = '#62d5db23';
         c.fillRect(edge - 3, 0, 6, H);
         const localColor = NEON[side < 0 ? left : right];
@@ -206,8 +258,40 @@ function road(c: Brush, left: number, right: number) {
         spill.addColorStop(0.5, localColor);
         spill.addColorStop(1, localColor + '00');
         c.fillStyle = spill;
-        c.fillRect(edge - 1.4, H * 0.36, 2.8, H * 0.28);
+        c.fillRect(edge - edgeWidth / 2, H * 0.36, edgeWidth, H * 0.28);
     }
+}
+
+function paintStreetLevels(
+    key: string,
+    width: number,
+    height: number,
+    scales: ReadonlyArray<readonly [number, number]>,
+    paint: (c: Brush) => void,
+    accents?: (c: Brush, level: number) => void,
+): void {
+    const source = typeof OffscreenCanvas === 'undefined' ? null : new OffscreenCanvas(width, height);
+    const brush = source?.getContext('2d');
+    if (brush) paint(brush as Brush);
+    streetFrames.set(
+        key,
+        scales.map(([scaleX, scaleY], level) =>
+            game.paint(
+                key + '-' + level,
+                width * scaleX,
+                height * scaleY,
+                (c) => {
+                    if (!source) return;
+                    c.scale(scaleX, scaleY);
+                    c.imageSmoothingEnabled = true;
+                    c.imageSmoothingQuality = 'high';
+                    c.drawImage(source, 0, 0);
+                    accents?.(c, level);
+                },
+                { res: 1 },
+            ),
+        ),
+    );
 }
 
 export function prepareNightArt(): void {
@@ -237,10 +321,11 @@ export function prepareNightArt(): void {
         },
         { res: 1 },
     );
-    game.paint(
+    paintStreetLevels(
         'night-crossing',
         512,
         64,
+        FACADE_SCALES,
         (c) => {
             c.fillStyle = '#263041';
             c.fillRect(0, 0, 512, 64);
@@ -248,26 +333,63 @@ export function prepareNightArt(): void {
                 const x = 4 + i * 28;
                 c.fillStyle = i % 6 < 3 ? '#576270' : '#365463';
                 c.fillRect(x, 10, 24, 35);
-                c.strokeStyle = '#202938';
-                c.lineWidth = 3;
-                c.beginPath();
-                c.moveTo(x, 44);
-                c.lineTo(x + 24, 10);
-                c.stroke();
             }
             c.fillStyle = '#152132';
             c.fillRect(0, 46, 512, 13);
-            c.fillStyle = '#799aa1';
-            c.fillRect(0, 59, 512, 2);
         },
-        { res: 1 },
+        (c, level) => {
+            const thickness = [3, 4, 5][level];
+            c.fillStyle = ['#799aa1', '#799aa1d9', '#799aa1b3'][level];
+            c.fillRect(0, 61 - thickness / 2, 512, thickness);
+        },
     );
     for (let k = 0; k < NAMES.length; k++) {
-        game.paint('night-sign-' + k, 128, 384, (c) => sign(c, k), { res: 1 });
-        game.paint('night-windows-' + k, 256, 512, (c) => windows(c, k), { res: 1 });
-        game.paint('night-shop-' + k, 512, 192, (c) => shop(c, k), { res: 1 });
+        signFrames[k] = prepareSign(k);
+        paintStreetLevels('night-windows-' + k, 256, 512, FACADE_SCALES, (c) => windows(c, k));
+        paintStreetLevels(
+            'night-shop-' + k,
+            512,
+            192,
+            FACADE_SCALES,
+            (c) => shop(c, k),
+            (c, level) => {
+                const thickness = [3, 5, 8][level];
+                c.fillStyle = NEON[k % 3] + ['ff', 'dd', 'aa'][level];
+                c.fillRect(14, 54.5 - thickness / 2, 484, thickness);
+            },
+        );
     }
     for (let l = 0; l < 3; l++)
-        for (let r = 0; r < 3; r++) game.paint('wet-' + l + '-' + r, W, H, (c) => road(c, l, r), { res: 1 });
-    game.paint('night-paving', 96, 384, pavement, { res: 1 });
+        for (let r = 0; r < 3; r++)
+            paintStreetLevels(
+                'wet-' + l + '-' + r,
+                W,
+                H,
+                SURFACE_SCALES,
+                (c) => road(c, l, r),
+                (c, level) => roadMarkings(c, l, r, level),
+            );
+    paintStreetLevels('night-paving', 96, 384, SURFACE_SCALES, pavement);
+    for (let color = 0; color < 3; color++) {
+        game.paint(
+            'night-fascia-' + color,
+            16,
+            16,
+            (c) => {
+                const light = c.createLinearGradient(0, 0, 0, 16);
+                const hue = NEON[color];
+                light.addColorStop(0, '#354052');
+                light.addColorStop(0.23, hue + '90');
+                light.addColorStop(0.42, hue);
+                light.addColorStop(0.58, hue);
+                light.addColorStop(0.77, hue + '90');
+                light.addColorStop(1, '#354052');
+                c.fillStyle = '#354052';
+                c.fillRect(0, 0, 16, 16);
+                c.fillStyle = light;
+                c.fillRect(0, 0, 16, 16);
+            },
+            { res: 1 },
+        );
+    }
 }
