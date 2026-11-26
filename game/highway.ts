@@ -1,10 +1,13 @@
-import { game, type Mesh } from './engine.js';
+import { frontage, spawnBuilding, tower } from './buildings.js';
+import { game } from './engine.js';
 
 export const ROAD_WIDTH = 12;
 export const SECTION = 24, SECTION_COUNT = 13;
 export const CIRCUIT_LENGTH = SECTION * SECTION_COUNT;
-const TOWER_COLORS = ['#6c9da8', '#85a7a1', '#9eaab5', '#7096a2', '#b4b9ac'];
-type Piece = { mesh: Mesh; offset: number };
+const TERRACE_TOP = -5.08;
+const CITY_FLOOR_TOP = -10;
+const DAY_DISTRICTS = ['retail', 'industrial', 'residential'] as const;
+type Piece = { mesh: Pick<ReturnType<typeof game.spawn>, 'z' | 'snap'>; offset: number };
 
 export function buildHighway() {
     game.render3d.lighting.preset('noon');
@@ -72,14 +75,16 @@ export function buildHighway() {
                 box('reflector', side * 5.982, 0.23, k * 8 - 8, 0.03, 0.14, 1.25, '#f08039');
             }
             box('pier', side * 4.7, -7.4, 0, 0.85, 13.2, 1.35, '#879b9a');
-            const n = i * 2 + (side === 1 ? 1 : 0),
-                height = 14 + ((n * 19) % 33);
-            const x = side * (22 + ((n * 11) % 18)),
-                w = 4 + ((n * 7) % 7.5),
-                depth = 5 + ((n * 3) % 5),
-                base = -9;
-            const facade = TOWER_COLORS[n % TOWER_COLORS.length];
-            box('tower', x, base + height / 2, 0, w, height, depth, facade);
+            const n = i * 2 + (side === 1 ? 1 : 0);
+            const near = frontage(DAY_DISTRICTS[n % DAY_DISTRICTS.length], n * 137);
+            for (const [key, x, z, base] of [
+                [near, side * 26.5, 0, TERRACE_TOP],
+                [tower(i + (side === 1 ? 1 : 0)), side * (49 + (n % 6) * 4), -6, CITY_FLOOR_TOP],
+            ] as const) {
+                const model = spawnBuilding(key, 'day-' + key + '-' + n + '-' + x, 1, base, side);
+                model.x = x;
+                for (const part of model.parts) pieces.push({ mesh: part, offset: z });
+            }
             box('podium', side * 22, -7.7, 0, 20, 4.6, 21, '#839999');
             box('terrace', side * 22, -5.27, 0, 20.4, 0.38, 21.4, '#b1c2ae');
             box('garden', side * 18, -4.97, 5, 7, 0.3, 3.7, '#73a68a');
@@ -98,43 +103,6 @@ export function buildHighway() {
                 });
                 pieces.push({ mesh: crown, offset: tz });
             }
-            box(
-                'annex',
-                x - side * (w * 0.5 + 1.9),
-                base + height * 0.2,
-                2.1,
-                4.4,
-                height * 0.4,
-                depth * 0.57,
-                '#759098',
-            );
-            box(
-                'service-line',
-                x + w * 0.24,
-                base + height * 0.54,
-                depth * 0.5 + 0.04,
-                0.2,
-                height * 0.79,
-                0.14,
-                n % 4 === 0 ? '#e78f5d' : '#c7d4bc',
-            );
-            box('crown', x, base + height + 0.65, 0, w * 0.78, 1.3, depth * 0.85, '#d1d6c9');
-            box(
-                'glass',
-                x - side * (w * 0.5 + 0.015),
-                base + height * 0.52,
-                0,
-                0.05,
-                height * 0.78,
-                depth * 0.55,
-                '#456f83',
-            );
-            for (let floor = 1; floor <= 4; floor++) {
-                box('ribbon', x, base + (height * floor) / 5, 0, w + 0.18, 0.32, depth + 0.16, '#b8cec9');
-            }
-            if (n % 3 === 0) box('mast', x, base + height + 2.7, 0, 0.12, 4, 0.12, '#637b83');
-            const farHeight = 22 + ((n * 23) % 48);
-            box('skyline', side * (49 + (n % 6) * 4), farHeight / 2 - 12, -6, 10, farHeight, 13, '#a3bbc3');
         }
         if (i % 4 === 3) {
             for (const side of [-1, 1]) {

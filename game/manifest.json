@@ -29,6 +29,16 @@
     }
   ],
   "assets": [
-    "assets/kestrel.glb"
+    "assets/kestrel.glb",
+    "assets/chinese.woff2",
+    "assets/chinese-font-OFL.txt",
+    "assets/arcade.glb",
+    "assets/depot_all.glb",
+    "assets/depot_closed.glb",
+    "assets/depot_left.glb",
+    "assets/depot_middle.glb",
+    "assets/depot_outer.glb",
+    "assets/prism.glb",
+    "assets/spire.glb"
   ]
 }

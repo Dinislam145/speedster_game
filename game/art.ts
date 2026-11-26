@@ -1,33 +1,33 @@
 import { game } from './engine.js';
 
-type Point = [number, number, number];
+type Point = [x: number, y: number, z: number, u: number];
 // Each cross-section narrows at its upper and lower shoulders. Flat normals keep
 // the change of plane visible even on the small screen.
 type Station = [z: number, halfWidth: number, bottom: number, top: number];
 function hull(name: string, stations: Station[]): void {
     const verts: number[] = [];
     const rings = stations.map(([z, w, low, high]): Point[] => [
-        [-w * 0.65, low, z],
-        [w * 0.65, low, z],
-        [w, low + (high - low) * 0.42, z],
-        [w * 0.69, high, z],
-        [-w * 0.69, high, z],
-        [-w, low + (high - low) * 0.42, z],
+        [-w * 0.65, low, z, 0.175],
+        [w * 0.65, low, z, 0.825],
+        [w, low + (high - low) * 0.42, z, 1],
+        [w * 0.69, high, z, 0.845],
+        [-w * 0.69, high, z, 0.155],
+        [-w, low + (high - low) * 0.42, z, 0],
     ]);
     function triangle(a: Point, b: Point, c: Point): void {
-        const ab = b.map((v, i) => v - a[i]),
-            ac = c.map((v, i) => v - a[i]);
+        const ab = b.slice(0, 3).map((v, i) => v - a[i]),
+            ac = c.slice(0, 3).map((v, i) => v - a[i]);
         const n = [
             ab[1] * ac[2] - ab[2] * ac[1],
             ab[2] * ac[0] - ab[0] * ac[2],
             ab[0] * ac[1] - ab[1] * ac[0],
         ];
         const length = Math.hypot(...n);
-        // Project both colours onto one hull so the outer flame cannot cover its red core.
-        for (const p of [a, b, c]) {
-            const u = 0.5 + p[0] * 3.1;
-            const v = 0.015 + (p[2] + 0.01) * 0.96;
-            verts.push(...p, n[0] / length, n[1] / length, n[2] / length, u, v);
+        // Each ring spans the same UV width, so the centreline and the edges
+        // of the colour gradient taper together through the length of the jet.
+        for (const [x, y, z, u] of [a, b, c]) {
+            const v = 0.015 + (z + 0.01) * 0.96;
+            verts.push(x, y, z, n[0] / length, n[1] / length, n[2] / length, u, v);
         }
     }
     for (let row = 1; row < rings.length; row++) {
@@ -66,18 +66,22 @@ export function makeArt(): void {
             c.fillStyle = plume;
             c.fillRect(0, 0, 64, 128);
 
-            const core = c.createLinearGradient(0, 0, 0, 94);
-            core.addColorStop(0, '#ff775b');
-            core.addColorStop(0.22, '#ff3d39');
-            core.addColorStop(0.8, '#ed263f');
-            core.addColorStop(1, '#ed263f00');
-            c.fillStyle = core;
-            c.beginPath();
-            c.moveTo(20, 0);
-            c.quadraticCurveTo(13, 34, 32, 94);
-            c.quadraticCurveTo(51, 34, 44, 0);
-            c.closePath();
-            c.fill();
+            const coreLength = 78;
+            for (let y = 0; y < coreLength; y++) {
+                const t = y / coreLength;
+                const radius = 13 * (1 - t * t);
+                const strength = (1 - t) ** 1.35;
+                const glow = c.createLinearGradient(32 - radius, 0, 32 + radius, 0);
+                glow.addColorStop(0, 'rgba(255, 94, 66, 0)');
+                glow.addColorStop(0.27, 'rgba(255, 94, 66, 0.65)');
+                glow.addColorStop(0.5, '#fff2cb');
+                glow.addColorStop(0.73, 'rgba(255, 94, 66, 0.65)');
+                glow.addColorStop(1, 'rgba(255, 94, 66, 0)');
+                c.globalAlpha = strength;
+                c.fillStyle = glow;
+                c.fillRect(32 - radius, y, 2 * radius, 1);
+            }
+            c.globalAlpha = 1;
         },
         { res: 1 },
     );

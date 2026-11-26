@@ -4,6 +4,7 @@ export const CRAFT_WIDTH = 2;
 const HOVER = 0.58;
 const BANK_LIMIT = 0.19;
 const EXHAUST_Y = -0.222;
+const NIGHT_EXHAUST_ALPHA = 0.36;
 export function spawnVehicle(night: boolean) {
     const craft = game.modelFiles.spawn('kestrel', { id: 'craft', size: 4.13, y: HOVER });
     const exhausts = [-1, 1].map((side) => {
@@ -16,7 +17,7 @@ export function spawnVehicle(night: boolean) {
             z: 1.965,
             unlit: true,
             texture: 'jet-flame',
-            alpha: 0.9,
+            alpha: night ? NIGHT_EXHAUST_ALPHA : 0.9,
         });
         return { obj, x };
     });
