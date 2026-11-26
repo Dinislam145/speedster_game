@@ -1,0 +1,34 @@
+{
+  "name": "speedster",
+  "screen": {
+    "width": 720,
+    "height": 1280,
+    "fit": "letterbox",
+    "background": "#9bd6e1"
+  },
+  "seed": 63923,
+  "backgroundPolicy": "pause",
+  "packs": [
+    {
+      "id": "typography"
+    },
+    {
+      "id": "backdrops"
+    },
+    {
+      "id": "backdrop-sky"
+    },
+    {
+      "id": "backdrop-stars"
+    },
+    {
+      "id": "core-3d"
+    },
+    {
+      "id": "model-files-3d"
+    }
+  ],
+  "assets": [
+    "assets/kestrel.glb"
+  ]
+}
