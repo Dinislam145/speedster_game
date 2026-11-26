@@ -23,9 +23,9 @@ export function spawnVehicle(night: boolean) {
     const craft = game.modelFiles.spawn('kestrel', { id: 'craft', size: 4.13, y: HOVER });
     for (const side of [-1, 1]) {
         const x = side * 0.56;
-        const plume = part('exhaust' + side, 'jet', x, -0.222, 1.965, '#49d8f4', [1, 1, 1], true);
+        const plume = part('exhaust' + side, 'jet', x, -0.222, 1.965, '#00e1ff', [1, 1, 1], true);
         plume.alpha = 0.63;
-        part('exhaust-core' + side, 'jet', x, -0.19, 1.965, '#d0ffff', [0.6, 0.48, 1], true);
+        part('exhaust-core' + side, 'jet', x, -0.19, 1.965, '#e80707', [0.6, 0.48, 1], true);
     }
     const shadow = game.spawn({
         id: 'hover-shadow',
