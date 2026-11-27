@@ -17,7 +17,7 @@ const BAG_SLOTS = [
     { along: -0.56, depth: -0.03, turn: -0.4 },
     { along: 0.13, depth: 0.46, turn: 0.65 },
 ];
-const MIN_BIN_GAP = 2;
+export const MIN_BIN_GAP = 2;
 const MIN_DOUBLE_BIN_GAP = 5;
 export const MIN_PARK_GAP = 3.25;
 const MIN_DOUBLE_BENCH_GAP = 7.8;
@@ -29,6 +29,19 @@ export const LANTERNS = 'market-lantern-string';
 export const LANTERN_HEIGHT = 8.8;
 export const GARAGE_PROPS = ['vending-machine', 'parked-scooter'] as const;
 export const POST: Placement = { model: 'illuminated-bollard', depth: 2.37 };
+// The alley between two frontages is dressed in depth bands, so the lot behind the
+// sidewalk never reads as bare ground.
+const GAP_FLOOR = -0.15;
+const GAP_PATH_MODEL = 'paving-module';
+const GAP_PATH_DEPTHS = [-4.3, -7.3, -10.3, -13.3, -16.3];
+const GAP_PATH_ACROSS = 2.7;
+const GAP_COLUMN = 3.2;
+const GAP_TREE_INSET = 0.85;
+const GAP_TREE_TURNS = 8;
+const GAP_BENCH_INSET = 0.62;
+const GAP_BENCH_TURN = Math.PI / 2;
+const GAP_BENCH_MIN_WIDTH = 4.6;
+const GAP_YARD_DEPTHS = [-4.1, -5.6];
 const GROUPS = {
     ramen: [
         { model: 'ramen-counter-facade', depth: 0.44 },
@@ -131,6 +144,69 @@ export function streetGap(industrial: boolean, seed: number, width: number): Pla
         ...benches.flatMap(at => GROUPS.rest.map(prop => ({
             ...prop, along: at + (prop.along ?? 0), depth: PARK_BENCH_DEPTH,
         }))),
+    ];
+}
+
+// A park alley: a paved path down the middle, flowering trees alternating sides,
+// benches and planters facing it from the walls, band after band into the lot.
+export function parkGap(seed: number, width: number): Placement[] {
+    const placements: Placement[] = [];
+    const columns = Math.max(1, Math.round(width / GAP_COLUMN));
+    const columnWidth = width / columns;
+    const rim = Math.max(0, width / 2 - GAP_TREE_INSET);
+    for (const [band, depth] of GAP_PATH_DEPTHS.entries()) {
+        const row = routeHash(seed + band * 131);
+        for (let column = 0; column < columns; column++) {
+            placements.push({
+                model: GAP_PATH_MODEL,
+                along: -width / 2 + (column + 0.5) * columnWidth,
+                depth,
+                base: GAP_FLOOR,
+                width: Math.min(GAP_PATH_ACROSS, columnWidth - 0.1),
+            });
+        }
+        // Sakura, one per column in a staggered grid, every tree turned differently.
+        const tree = (along: number) => placements.push({
+            model: 'flowering-street-tree',
+            along,
+            depth: depth + 0.4,
+            base: GAP_FLOOR,
+            turn: (routeHash(row + Math.round(along * 10)) % GAP_TREE_TURNS) * Math.PI / GAP_TREE_TURNS,
+        });
+        if (columns === 1) tree((row & 1 ? 1 : -1) * rim * (0.75 + ((row >>> 8) % 25) / 100));
+        else for (let column = 0; column < columns; column++) {
+            if ((column + band) % 2) continue;
+            tree(-width / 2 + (column + 0.5) * columnWidth);
+        }
+        if (width < GAP_BENCH_MIN_WIDTH || band % 2 !== 0) continue;
+        // Benches stand along both walls, turned to face the middle of the alley.
+        for (const wall of [-1, 1]) {
+            const along = wall * (width / 2 - GAP_BENCH_INSET);
+            placements.push({
+                model: 'slatted-bench', along, depth: depth + 0.9, base: GAP_FLOOR,
+                turn: wall * GAP_BENCH_TURN,
+            });
+            placements.push({ model: 'leaf-planter', along, depth: depth - 0.9, base: GAP_FLOOR });
+        }
+    }
+    return placements;
+}
+
+// A service yard: crates, bins and bags between the sidewalk and the fences that
+// close the alley off.
+export function serviceGap(seed: number, width: number): Placement[] {
+    if (width < MIN_BIN_GAP) return [];
+    const row = routeHash(seed + 613);
+    const hand = row & 1 ? 1 : -1;
+    const along = Math.min(width / 4, 1.1);
+    const [crates, bins] = GAP_YARD_DEPTHS;
+    return [
+        { model: 'delivery-crate', along: hand * along, depth: crates, base: GAP_FLOOR },
+        { model: 'delivery-crate', along: hand * along, depth: crates, base: GAP_FLOOR + 0.4, turn: 0.18 },
+        { model: 'delivery-crate', along: -hand * along, depth: bins + 0.5, base: GAP_FLOOR, turn: 0.35 },
+        { model: 'recycling-bin', along: -hand * along, depth: bins, base: GAP_FLOOR },
+        { model: 'tied-trash-bag', along: hand * along * 1.3, depth: bins + 0.9, base: GAP_FLOOR, turn: 0.4 },
+        { model: 'tied-trash-bag', along: hand * along * 1.3 + 0.5, depth: bins + 1.1, base: GAP_FLOOR, turn: -0.5 },
     ];
 }
 

@@ -1,5 +1,5 @@
-import { curbFitting, GARAGE_PROPS, LANTERN_HEIGHT, LANTERNS, MIN_PARK_GAP, POST, POST_SPACING, streetGap, streetGroup } from './night-props.js';
-import { facadeLights, GARAGE_BAYS } from './building-lights.js';
+import { curbFitting, GARAGE_PROPS, LANTERN_HEIGHT, LANTERNS, MIN_BIN_GAP, MIN_PARK_GAP, parkGap, POST, POST_SPACING, serviceGap, streetGap, streetGroup } from './night-props.js';
+import { facadeLights, garageBays } from './building-lights.js';
 import { buildingSize, frontage, tower, type Building } from './buildings.js';
 import { game } from './engine.js';
 import { DOOR_LIGHTS, NAMES, NEON, NIGHT_HAZE, signFrames, streetFrames } from './night-art.js';
@@ -30,6 +30,17 @@ const GARAGE_THRESHOLD = 4.54;
 const GARAGE_PROP_CLEARANCE = 0.06;
 const GARAGE_FLOOR = 0.18;
 const GARAGE_PROP_YAW = [Math.PI / 4, Math.PI / 2];
+// Alleys are closed off and dressed with garlands in depth bands of their own.
+const GAP_GARLANDS = [
+    { depth: 2.1, height: LANTERN_HEIGHT },
+    { depth: 5.6, height: 8 },
+];
+const GAP_FENCE_DEPTHS = [-3.1, -8.2];
+const GAP_FENCE_HEIGHT = 1.5;
+const GAP_FENCE_SLAT = 0.42;
+const GAP_FENCE_TINT = '#5b6784';
+const GAP_FENCE_EMISSIVE = 0.18;
+const GAP_GROUND_Y = -0.02;
 const NIGHT_ROWS = [{ offset: 0, scale: 1 }, { offset: 23, scale: 1 }, { offset: 44, scale: 1.25 }];
 const ROAD_TINT = { retail: '#35363d', residential: '#31343d', industrial: '#30343a' };
 const FACADE_FILL = 0.42;
@@ -118,6 +129,35 @@ function defineSignBox(): void {
         verts[i + 6] = 0.5 + nz * x - nx * z;
     }
     game.world3d.defineMesh('night-sign-box', verts);
+}
+
+// A slatted fence panel that closes an alley off, built in metres: it spans the
+// gap between the two buildings, so slats keep their width at every gap width.
+function defineGapFence(name: string, width: number, height: number): void {
+    const source = game.world3d.meshVerts(game.world3d.mesh('box'));
+    if (!source) throw new Error('The box mesh is missing');
+    const box: Float32Array = source;
+    const verts: number[] = [];
+    function part(cx: number, cy: number, cz: number, w: number, h: number, d: number): void {
+        for (let i = 0; i < box.length; i += 8)
+            verts.push(
+                box[i] * w + cx, box[i + 1] * h + cy, box[i + 2] * d + cz,
+                box[i + 3], box[i + 4], box[i + 5], 0.5, 0.5,
+            );
+    }
+    const post = 0.1;
+    const top = height + 0.08;
+    part(-width / 2 + post, top / 2, 0, post * 2, top, post * 2);
+    part(width / 2 - post, top / 2, 0, post * 2, top, post * 2);
+    part(0, height - 0.09, 0, width - post * 2, 0.08, 0.06);
+    part(0, height * 0.42, 0, width - post * 2, 0.05, 0.05);
+    const slats = Math.max(2, Math.round((width - 0.4) / GAP_FENCE_SLAT));
+    const slatHeight = height - 0.28;
+    for (let i = 0; i < slats; i++) {
+        const x = -width / 2 + 0.2 + ((width - 0.4) * (i + 0.5)) / slats;
+        part(x, 0.1 + slatHeight / 2, 0, 0.07, slatHeight, 0.04);
+    }
+    game.world3d.defineMesh(name, new Float32Array(verts));
 }
 
 function ribbon(fragment: Fragment, origin: ReturnType<typeof sampleSection>): void {
@@ -304,7 +344,8 @@ function dress(fragment: Fragment, pool: InstancePool, route: NightRoute): void 
         }
         fragment.pieces.push(item);
     }
-    function stretchLanterns(from: { x: number; z: number }, to: { x: number; z: number }) {
+    function stretchLanterns(from: { x: number; z: number }, to: { x: number; z: number },
+        height = LANTERN_HEIGHT) {
         const dx = to.x - from.x, dz = to.z - from.z;
         const span = Math.hypot(dx, dz);
         const count = Math.max(1, Math.round(span / game.modelFiles.get(LANTERNS)!.size.x));
@@ -312,7 +353,7 @@ function dress(fragment: Fragment, pool: InstancePool, route: NightRoute): void 
         for (let i = 0; i < count; i++) {
             const t = (i + 0.5) / count;
             modelAt(LANTERNS, from.x + t * dx, from.z + t * dz, yaw, 0,
-                { width: span / count, centreY: LANTERN_HEIGHT });
+                { width: span / count, centreY: height });
         }
     }
     function sidewalk(distance: number, side: number, depth: number) {
@@ -320,11 +361,26 @@ function dress(fragment: Fragment, pool: InstancePool, route: NightRoute): void 
         const across = side * (at.width / 2 + WALK - depth);
         return { x: at.x + at.cos * across, z: at.z + at.sin * across, heading: at.heading };
     }
-    function parkAnchor(lot: ReturnType<typeof frontageLot>, side: number, direction: number) {
+    function parkAnchor(lot: ReturnType<typeof frontageLot>, side: number, direction: number,
+        setback = PARK_LANTERN_SETBACK) {
         const at = lot.origin;
-        const across = side * (at.width / 2 + WALK + PARK_LANTERN_SETBACK);
+        const across = side * (at.width / 2 + WALK + setback);
         const along = direction * lot.wallHalfWidth;
         return { x: at.x + at.cos * across + at.sin * along, z: at.z + at.sin * across - at.cos * along };
+    }
+    function fenceBand(index: number, distance: number, depth: number, span: number, side: number) {
+        const mesh = 'gap-fence-' + slot + '-' + side + '-' + index;
+        defineGapFence(mesh, span, GAP_FENCE_HEIGHT);
+        const at = sidewalk(distance, side, depth);
+        const piece = pool.take(mesh, id => [game.spawn({
+            id, mesh, rough: 0.88, emissive: GAP_FENCE_EMISSIVE, tags: ['street-prop', 'gap-fence'],
+        })]);
+        Object.assign(piece, { x: at.x, z: at.z, yaw: at.heading + Math.PI / 2, fresh: true });
+        const obj = piece.parts[0];
+        obj.visible = true;
+        obj.y = GAP_GROUND_Y;
+        obj.tint = GAP_FENCE_TINT;
+        fragment.pieces.push(piece);
     }
     function propAt(prop: ReturnType<typeof streetGroup>[number], distance: number, side: number) {
         const at = sidewalk(distance - side * (prop.along ?? 0), side, prop.depth);
@@ -393,8 +449,11 @@ function dress(fragment: Fragment, pool: InstancePool, route: NightRoute): void 
             lotWidth = size.x * scale;
             garage = key.startsWith('depot_');
             if (garage) {
-                for (const [index, [x, , , bayWidth]] of GARAGE_BAYS.entries()) {
-                    const variant = routeHash(seed + index) % GARAGE_PROPS.length;
+                const bays = garageBays(key);
+                // Neighbouring open bays take different props, so a garage reads as varied.
+                const firstVariant = routeHash(seed) % GARAGE_PROPS.length;
+                for (const [index, [x, , , bayWidth]] of bays.entries()) {
+                    const variant = (firstVariant + index) % GARAGE_PROPS.length;
                     const model = GARAGE_PROPS[variant];
                     const dimensions = game.modelFiles.get(model)!.size;
                     const turn = GARAGE_PROP_YAW[variant];
@@ -462,9 +521,24 @@ function dress(fragment: Fragment, pool: InstancePool, route: NightRoute): void 
         const width = gapEnd - gapStart - 2 * GAP_EDGE_MARGIN;
         const industrial = section.environment.district === 'industrial' || garage ||
             (next.halfWidth > 0 && next.key.startsWith('depot_'));
-        for (const prop of streetGap(industrial, seed, width)) propAt(prop, (gapStart + gapEnd) / 2, side);
-        if (!industrial && lot.halfWidth && next.halfWidth && width >= MIN_PARK_GAP) {
-            stretchLanterns(parkAnchor(lot, side, 1), parkAnchor(next, side, -1));
+        const gapCentre = (gapStart + gapEnd) / 2;
+        const park = !industrial && width >= MIN_PARK_GAP;
+        for (const prop of streetGap(industrial, seed, width)) propAt(prop, gapCentre, side);
+        if (park) {
+            for (const prop of parkGap(seed, width)) propAt(prop, gapCentre, side);
+            // Garlands hang between the two buildings, as deep as their side walls reach.
+            if (lot.halfWidth > 0 && next.halfWidth > 0) {
+                const buildingDepth = buildingSize(lot.key).z * lot.scale;
+                for (const garland of GAP_GARLANDS) {
+                    if (garland.depth > buildingDepth - 0.4) continue;
+                    stretchLanterns(parkAnchor(lot, side, 1, garland.depth),
+                        parkAnchor(next, side, -1, garland.depth), garland.height);
+                }
+            }
+        } else if (industrial && width >= MIN_BIN_GAP) {
+            for (const prop of serviceGap(seed, width)) propAt(prop, gapCentre, side);
+            for (const [index, depth] of GAP_FENCE_DEPTHS.entries())
+                fenceBand(index, gapCentre, depth, gapEnd - gapStart + 0.3, side);
         }
     }
     // Join short strands at their fittings so the lanterns retain their proportions across a wide road.

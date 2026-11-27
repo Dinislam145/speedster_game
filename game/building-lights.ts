@@ -13,8 +13,11 @@ const WINDOW_GLASS_OFFSET = 0.505;
 const SHOP_GLASS_OFFSET = 0.905;
 const geometry = new Map<Building, { windows: string[][]; entry: string | undefined }>();
 
-// All shutter variants share the same three bays.
-export const GARAGE_BAYS = openings.depot_all.entries;
+// Only the bays a variant actually leaves open; a fully shuttered depot has none.
+export function garageBays(key: Building) {
+    const source = openings[key];
+    return 'entries' in source ? source.entries : [];
+}
 
 function paneMesh(name: string, panes: Pane[], faceOffset = 0): string | undefined {
     if (!panes.length) return undefined;
