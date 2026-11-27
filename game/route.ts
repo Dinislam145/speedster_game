@@ -3,6 +3,8 @@ export const CAMERA_LOOK_AHEAD = 9.1;
 export const NIGHT_PROFILE = {
     widths: [10, 12, 14],
     startWidth: 12,
+    // Only used by the old mixed layout: with SINGLE_LEFT_TURN on, the road
+    // starts bending 20° left from the start line, with no straight at all.
     startStraight: 96,
     widthBlend: 48,
     curveBlend: 24,
@@ -19,7 +21,7 @@ export const NIGHT_PROFILE = {
     corridorHalfWidth: 72,
     collisionStep: 8,
     adjacentDistance: 176,
-    forward: 384,
+    forward: 240,
     behind: 48,
     fogEnd: 320,
 };
@@ -50,6 +52,8 @@ export type RoadSection = {
         readonly length: number;
         readonly angle: number;
         readonly radius: number;
+        /** Metres eased at each end of the bend; 0 keeps the curvature constant. */
+        readonly blend: number;
         readonly widthStart: number;
         readonly widthEnd: number;
         readonly surface: District;
@@ -58,7 +62,14 @@ export type RoadSection = {
     readonly long: boolean;
     readonly points: readonly Point[];
 };
-type RoadChoice = { length: number; angle: number; radius: number; width: number; long: boolean };
+type RoadChoice = {
+    length: number;
+    angle: number;
+    radius: number;
+    width: number;
+    long: boolean;
+    blend: number;
+};
 
 export function routeHash(value: number): number {
     value = Math.imul(value ^ (value >>> 16), 0x21f0aaad);
@@ -67,10 +78,12 @@ export function routeHash(value: number): number {
 }
 
 function headingAt(section: RoadSection, offset: number): number {
-    const { angle, radius, length } = section.road;
+    const { angle, radius, length, blend } = section.road;
     if (angle === 0 || offset <= 0) return section.origin.heading;
     if (offset >= length) return section.origin.heading + angle;
-    const blend = NIGHT_PROFILE.curveBlend;
+    // No easing: the bend keeps the same curvature from the first metre to the
+    // last, so consecutive sections join into one unbroken turn.
+    if (blend <= 0) return section.origin.heading + (Math.sign(angle) * offset) / radius;
     const ramp = (s: number) => (s - (blend / Math.PI) * Math.sin((Math.PI * s) / blend)) / 2;
     const distance =
         offset < blend
@@ -102,6 +115,7 @@ function sectionAt(
             length: choice.length,
             angle: choice.angle,
             radius: choice.radius,
+            blend: choice.blend,
             widthStart,
             widthEnd: choice.width,
             surface: environment.district,
@@ -137,12 +151,13 @@ export function sampleSection(section: RoadSection, distance: number): RoadSampl
 }
 
 function straight(length: number, width: number): RoadChoice {
-    return { length, width, angle: 0, radius: 0, long: false };
+    return { length, width, angle: 0, radius: 0, long: false, blend: 0 };
 }
 
-function curve(degrees: number, radius: number, width: number, long = false): RoadChoice {
+function curve(degrees: number, radius: number, width: number, long = false,
+    blend = NIGHT_PROFILE.curveBlend): RoadChoice {
     const angle = degrees * RADIANS;
-    return { length: Math.abs(angle) * radius + NIGHT_PROFILE.curveBlend, width, angle, radius, long };
+    return { length: Math.abs(angle) * radius + blend, width, angle, radius, long, blend };
 }
 
 const CONTROL_CHOICES = [
@@ -154,6 +169,14 @@ const CONTROL_CHOICES = [
     curve(135, 220, 12, true),
     straight(96, 14),
 ];
+
+// The map is ONE manoeuvre, repeated: a left-hand bend of exactly 20° from
+// straight ahead. There are no straights and no right-handers, so a section's
+// shape is the same everywhere and only its width and radius vary with the seed.
+// A negative angle is a left turn in this codebase (heading grows to the right).
+// Turn the flag off to get the old mix of straights and seeded angles back.
+const SINGLE_LEFT_TURN = true;
+const TURN_LEFT_DEGREES = -20;
 
 const CONTROL_POINTS = {
     narrow: CONTROL_CHOICES[0].length + CONTROL_CHOICES[1].length,
@@ -231,14 +254,11 @@ export function makeRoute(seed: number, mode: RouteMode) {
         const origin = previous ? sampleSection(previous, start) : { x: 0, z: 0, heading: 0 };
         const width = previous?.road.widthEnd ?? NIGHT_PROFILE.startWidth;
         const environment = environmentAt(id, previous);
-        const planned =
-            mode === 'control'
-                ? CONTROL_CHOICES[id]
-                : id === 0
-                  ? straight(NIGHT_PROFILE.startStraight, width)
-                  : id === 1
-                    ? curve(31, 215, width)
-                    : undefined;
+        const planned = mode === 'control' ? CONTROL_CHOICES[id] : undefined;
+        // A fixed left turn never stops turning, so its heading passes the 80°
+        // limit by design and it closes a lap after 360°. Both are fine: the
+        // streaming window covers only a fraction of a lap.
+        const fixed = mode === 'random' && SINGLE_LEFT_TURN;
 
         function pointsFor(section: RoadSection): FootprintPoint[] {
             const points: FootprintPoint[] = [];
@@ -271,18 +291,20 @@ export function makeRoute(seed: number, mode: RouteMode) {
             const isLong = roll >= 1 - NIGHT_PROFILE.longChance;
             const choice =
                 planned ??
-                (previous?.long || roll < NIGHT_PROFILE.straightChance
-                    ? straight(Math.round(between(NIGHT_PROFILE.straightLength)), targetWidth)
-                    : curve(
-                          (next() < 0.5 ? -1 : 1) *
-                              between(isLong ? NIGHT_PROFILE.longAngle : NIGHT_PROFILE.normalAngle),
-                          between(NIGHT_PROFILE.radius),
-                          targetWidth,
-                          isLong,
-                      ));
+                (SINGLE_LEFT_TURN
+                    ? curve(TURN_LEFT_DEGREES, between(NIGHT_PROFILE.radius), targetWidth, false, 0)
+                    : previous?.long || roll < NIGHT_PROFILE.straightChance
+                      ? straight(Math.round(between(NIGHT_PROFILE.straightLength)), targetWidth)
+                      : curve(
+                            (next() < 0.5 ? -1 : 1) *
+                                between(isLong ? NIGHT_PROFILE.longAngle : NIGHT_PROFILE.normalAngle),
+                            between(NIGHT_PROFILE.radius),
+                            targetWidth,
+                            isLong,
+                        ));
             const candidate = sectionAt(id, start, origin, width, choice, environment);
             const samples = pointsFor(candidate);
-            if (planned || validate(candidate, sampleSection(candidate, candidate.end), samples)) {
+            if (planned || fixed || validate(candidate, sampleSection(candidate, candidate.end), samples)) {
                 commit(candidate, samples);
                 return;
             }

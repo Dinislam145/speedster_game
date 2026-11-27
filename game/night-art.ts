@@ -179,6 +179,17 @@ function paintStreetLevels(
 export function prepareNightArt(): void {
     const swatchWidth = 16;
     const glowHeight = 32;
+    const propSpillSize = 64;
+    game.paint('night-prop-spill', propSpillSize, propSpillSize, c => {
+        const centre = propSpillSize / 2;
+        const glow = c.createRadialGradient(centre, centre, 0, centre, centre, centre);
+        glow.addColorStop(0, '#ffffff');
+        glow.addColorStop(0.4, '#ffffff88');
+        glow.addColorStop(0.75, '#ffffff24');
+        glow.addColorStop(1, '#ffffff00');
+        c.fillStyle = glow;
+        c.fillRect(0, 0, propSpillSize, propSpillSize);
+    });
     game.paint('night-window-glow', swatchWidth * WINDOW_COLORS.length, glowHeight, c => {
         WINDOW_COLORS.forEach((color, index) => {
             const glow = c.createLinearGradient(0, 0, 0, glowHeight);

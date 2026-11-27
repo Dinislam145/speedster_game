@@ -11,7 +11,10 @@ type Placement = {
     width?: number;
     lights?: PropLight[];
     glow?: Glow[];
+    spill?: PropSpill;
 };
+/** Ground glow that travels with the prop and stays independent of the light budget. */
+type PropSpill = { color: string; width: number; length: number; forward?: number; alpha: number };
 /**
  * A lamp a prop carries. The offset is from the model's centre in metres —
  * `+x` right, `+y` up, `+z` out of its front — so the light sits on the bulb it
@@ -44,19 +47,11 @@ export type Glow = {
     strength: number;
 };
 
-const POST_LIGHTS: PropLight[] = [
-    // On the crown's diffuser band, not at the base: the glow reads from the top.
-    { color: '#ff4fa8', radius: 7, intensity: 26, offset: [0, 0.32, 0] },
-];
+const POST_SPILL: PropSpill = { color: '#ff4fa8', width: 3, length: 0.85, alpha: 0.48 };
 const POST_GLOW: Glow[] = [{ part: 'diffuser', color: '#ff6cba', strength: 2.6 }];
 
 // The curb strip throws its light across the road, not into the ground.
-const CURB_LIGHTS: PropLight[] = [
-    {
-        color: '#4bb6ff', radius: 15, intensity: 220, offset: [0, 0.17, 0.1],
-        cone: 52, innerCone: 22, pitch: 9, dir: 0,
-    },
-];
+const CURB_SPILL: PropSpill = { color: '#4bb6ff', width: 2.6, length: 4.4, forward: 2.2, alpha: 0.52 };
 const CURB_GLOW: Glow[] = [{ part: 'diffuser', color: '#5cc2ff', strength: 2.4 }];
 // A street drinks machine reads as the coffee machine: an ordinary warm lamp.
 const COFFEE_LIGHTS: PropLight[] = [
@@ -90,10 +85,7 @@ const MINIMART_GLOW: Glow[] = [
     { part: 'glazing', color: '#fff3d6', strength: 1.8 },
     { part: 'sign_24h', color: '#fff3d6', strength: 1.5 },
 ];
-// Every sakura gets a cool uplight in its crown, aimed up and a little out.
-const TREE_LIGHTS: PropLight[] = [
-    { color: '#5fa8ff', radius: 6.5, intensity: 48, offset: [0, -1.45, 0.25], cone: 32, pitch: -78 },
-];
+const TREE_SPILL: PropSpill = { color: '#5fa8ff', width: 3.2, length: 3.2, alpha: 0.46 };
 // The surfaces that burn, by model. The strength here is baked into the model
 // once it is loaded; the placements below choose the tint each instance wears.
 const MODEL_GLOW: Record<string, Glow[]> = {
@@ -133,7 +125,7 @@ export const LANTERNS = 'market-lantern-string';
 export const LANTERN_HEIGHT = 8.8;
 export const GARAGE_PROPS = ['vending-machine', 'parked-scooter'] as const;
 export const POST: Placement = {
-    model: 'illuminated-bollard', depth: 2.37, lights: POST_LIGHTS, glow: POST_GLOW,
+    model: 'illuminated-bollard', depth: 2.37, spill: POST_SPILL, glow: POST_GLOW,
 };
 // The alley between two frontages is dressed in depth bands, so the lot behind the
 // sidewalk never reads as bare ground.
@@ -174,9 +166,9 @@ const GROUPS = {
     refuse: [{ model: 'recycling-bin', depth: BIN_DEPTH }],
     bags: [{ model: 'tied-trash-bag', depth: BIN_DEPTH }],
     drain: [{ model: 'storm-drain', depth: 2.45, base: -0.021 }],
-    curb: [{ model: 'curb-light', depth: 2.72, base: -0.143, lights: CURB_LIGHTS, glow: CURB_GLOW }],
+    curb: [{ model: 'curb-light', depth: 2.72, base: -0.143, spill: CURB_SPILL, glow: CURB_GLOW }],
     paving: [{ model: 'paving-module', depth: -1.38, base: -0.15 }],
-    tree: [{ model: 'flowering-street-tree', depth: 1.45, lights: TREE_LIGHTS }],
+    tree: [{ model: 'flowering-street-tree', depth: 1.45, spill: TREE_SPILL }],
 } satisfies Record<string, Placement[]>;
 type Group = keyof typeof GROUPS;
 type Layout = { primary: Group[]; opposite: Group[] };
@@ -278,7 +270,7 @@ export function parkGap(seed: number, width: number): Placement[] {
             depth: depth + 0.4,
             base: GAP_FLOOR,
             turn: (routeHash(row + Math.round(along * 10)) % GAP_TREE_TURNS) * Math.PI / GAP_TREE_TURNS,
-            lights: TREE_LIGHTS,
+            spill: TREE_SPILL,
         });
         if (columns === 1) tree((row & 1 ? 1 : -1) * rim * (0.75 + ((row >>> 8) % 25) / 100));
         else for (let column = 0; column < columns; column++) {

@@ -17,9 +17,9 @@ const WALK = 2.8;
 const CURB = 0.15;
 const STEP = 4;
 const TILE = FRAGMENT_LENGTH;
-const RESERVE = 2 * TILE;
 const WINDOW_SPILL_ROAD_WIDTH = 4.2;
 const WINDOW_SPILL_LAYER_HEIGHT = 0.012;
+const PROP_SPILL_LAYER_HEIGHT = 0.024;
 const SIGN_LOD_DISTANCES = [47, 88, 149];
 const SIGN_COUNTS = { retail: 3, residential: 1, industrial: 2 };
 const LOT_GAP = 1.2;
@@ -46,6 +46,7 @@ const PROP_LIGHT_GAIN = 1;
 // How many local lights reach the renderer per frame, nearest first.
 const LIGHT_BUDGET = 160;
 const NIGHT_ROWS = [{ offset: 0, scale: 1 }, { offset: 23, scale: 1 }, { offset: 44, scale: 1.25 }];
+const BACKGROUND_BUILDING_SIDE = 1;
 const ROAD_TINT = { retail: '#35363d', residential: '#31343d', industrial: '#30343a' };
 const FACADE_FILL = 0.42;
 const MARQUEE_TINT = '#bfc4d1';
@@ -55,9 +56,7 @@ const NAMEPLATE_LIGHT = { radius: 6.5, intensity: 12 };
 const ROAD_LOD_DISTANCES = [36, 76];
 const PAVING_LOD_DISTANCES = [33, 67];
 const BRIDGE_LOD_DISTANCES = [62, 120];
-// Road surfaces are LIT: prop lamps and the sky reach them, so a curb spot draws
-// a pool on the tarmac. The emissive term is what keeps the painted brightness
-// the unlit version had, and it is what the reflections were standing in for.
+// The road receives local lights and sky fill. Emissive preserves its base brightness.
 type Surface = { lit?: boolean; emissive?: number; rough?: number };
 const ROAD_SURFACE: Surface = { lit: true, emissive: 0.52, rough: 0.64 };
 const PAVING_SURFACE: Surface = { lit: true, rough: 0.92 };
@@ -79,6 +78,7 @@ type PlacedLight = {
     x: number;
     z: number;
     y: number;
+    yaw: number;
 };
 type Piece = {
     parts: Parts;
@@ -381,8 +381,7 @@ function dress(fragment: Fragment, pool: InstancePool, route: NightRoute): void 
             const burn = glow.find(piece => name.includes(piece.part));
             if (burn) part.tint = burn.color;
         }
-        // Lamps are made lit, not switched on later: `on` is set as they are added,
-        // and the placement below only moves and aims them.
+        // Allocate lamps once and update their route-space pose on each placement.
         if (!item.lights)
             item.lights = (lights ?? []).map(light => ({
                 obj: game.lights.add({
@@ -397,6 +396,7 @@ function dress(fragment: Fragment, pool: InstancePool, route: NightRoute): void 
                 x: 0,
                 z: 0,
                 y: 0,
+                yaw: 0,
             }));
         const cos = Math.cos(yaw), sin = Math.sin(yaw);
         for (const [index, placed] of item.lights.entries()) {
@@ -409,8 +409,7 @@ function dress(fragment: Fragment, pool: InstancePool, route: NightRoute): void 
             placed.x = x + ox * cos - oz * sin;
             placed.z = z + ox * sin + oz * cos;
             placed.y = centre + oy;
-            // A spot's yaw is a world angle, so it follows the prop's own facing.
-            placed.obj.light3d.dir = yaw + (light.dir ?? 0) * DEGREES;
+            placed.yaw = yaw + (light.dir ?? 0) * DEGREES;
             placed.obj.light3d.on = 1;
         }
         fragment.pieces.push(item);
@@ -455,8 +454,28 @@ function dress(fragment: Fragment, pool: InstancePool, route: NightRoute): void 
     }
     function propAt(prop: ReturnType<typeof streetGroup>[number], distance: number, side: number) {
         const at = sidewalk(distance - side * (prop.along ?? 0), side, prop.depth);
-        modelAt(prop.model, at.x, at.z, at.heading + side * Math.PI / 2 + (prop.turn ?? 0),
-            CURB + (prop.base ?? 0), { width: prop.width, lights: prop.lights, glow: prop.glow });
+        const yaw = at.heading + side * Math.PI / 2 + (prop.turn ?? 0);
+        const floor = CURB + (prop.base ?? 0);
+        modelAt(prop.model, at.x, at.z, yaw, floor, { width: prop.width, lights: prop.lights, glow: prop.glow });
+        if (!prop.spill || PROP_LIGHT_GAIN <= 0) return;
+        const { color, width, length, forward = 0, alpha } = prop.spill;
+        const spill = pool.take('prop-light-spill', id => [game.spawn({
+            id, mesh: 'plane', texture: 'night-prop-spill', unlit: true, alpha,
+        })]);
+        Object.assign(spill, {
+            x: at.x - forward * Math.sin(yaw),
+            z: at.z + forward * Math.cos(yaw),
+            yaw,
+            fresh: true,
+        });
+        const patch = spill.parts[0];
+        patch.y = floor + PROP_SPILL_LAYER_HEIGHT;
+        patch.sx = width;
+        patch.sz = length;
+        patch.tint = color;
+        patch.alpha = Math.min(1, alpha * PROP_LIGHT_GAIN);
+        patch.visible = true;
+        fragment.pieces.push(spill);
     }
     const nextSection = route.sectionFor(end);
     const nextEnd = Math.min(nextSection.end, (Math.floor(end / TILE) + 1) * TILE);
@@ -467,6 +486,7 @@ function dress(fragment: Fragment, pool: InstancePool, route: NightRoute): void 
         let lotWidth = 0;
         let garage = false;
         for (const [row, layout] of NIGHT_ROWS.entries()) {
+            if (row !== 0 && side !== BACKGROUND_BUILDING_SIDE) continue;
             const key = row === 0 ? lot.key : tower(routeHash(seed + row));
             const size = buildingSize(key);
             const setback = origin.width / 2 + WALK + layout.offset;
@@ -669,7 +689,7 @@ export function buildNightCity(route: NightRoute) {
 
     return (distance: number) => {
         const from = Math.floor((distance - NIGHT_PROFILE.behind) / TILE) * TILE;
-        const goal = distance + NIGHT_PROFILE.forward + RESERVE;
+        const goal = distance + NIGHT_PROFILE.forward;
         route.cover(from, goal + TILE);
         const here = route.sampleRoad(distance);
         const abrupt = Math.abs(distance - previousDistance) > TILE;
@@ -744,6 +764,8 @@ export function buildNightCity(route: NightRoute) {
                     light.obj.x = lx * here.cos + lz * here.sin;
                     light.obj.z = -lx * here.sin + lz * here.cos;
                     light.obj.y = light.y;
+                    // Use the same route-to-scene rotation for the spot's direction as for the prop.
+                    light.obj.light3d.dir = light.yaw - here.heading;
                     if (piece.fresh) light.obj.snap();
                 }
                 piece.fresh = false;

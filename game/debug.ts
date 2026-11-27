@@ -10,8 +10,9 @@ function jump(distance: number | undefined) {
 }
 
 export function addDebugControls(): void {
-    game.inspect.state(() => ({ ...run }));
+    // One state object: a second inspect.state would replace the first.
     game.inspect.state(() => ({
+        ...run,
         lightsSent: game.lights.active,
         lightsAll: game.lights.all.length,
         lightsMax: game.lights.max,
