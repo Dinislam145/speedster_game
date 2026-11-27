@@ -11,6 +11,46 @@ function jump(distance: number | undefined) {
 
 export function addDebugControls(): void {
     game.inspect.state(() => ({ ...run }));
+    game.inspect.state(() => ({
+        lightsSent: game.lights.active,
+        lightsAll: game.lights.all.length,
+        lightsMax: game.lights.max,
+    }));
+    game.cheats.add({
+        name: 'probe',
+        does: 'TEMP: report glow materials and spot lamps',
+        run: () => {
+            const lines: string[] = [];
+            for (const key of ['illuminated-bollard', 'curb-light', 'vending-machine', 'minimart-facade']) {
+                const model = game.modelFiles.get(key);
+                if (!model) continue;
+                lines.push(key + ': ' + model.parts.map((part) => {
+                    const material = game.world3d.materialAt(part.material);
+                    return (material?.name ?? '?').split(':').pop() + ' e=' + (material?.emissive.toFixed(2) ?? '?');
+                }).join(', '));
+            }
+            const lamps = game.lights.all;
+            lines.push('lamps ' + lamps.length + ' spots ' + lamps.filter(h => h.light3d.cone > 0).length);
+            const eye = game.world3d.camera.eye;
+            const ranges = lamps
+                .map(h => Math.hypot(h.x - eye.x, h.y - eye.y, h.z - eye.z))
+                .sort((a, b) => a - b);
+            lines.push('range 160=' + (ranges[159]?.toFixed(0) ?? '-') +
+                ' 256=' + (ranges[255]?.toFixed(0) ?? '-') +
+                ' last=' + (ranges.at(-1)?.toFixed(0) ?? '-'));
+            for (const key of ['curb-light', 'illuminated-bollard']) {
+                const list = lamps.filter(h => h.id.startsWith('night-' + key + '-lamp'));
+                const sample = list.slice(0, 2).map(h => {
+                    const d = h.light3d;
+                    return `r${d.radius.toFixed(0)} i${d.intensity.toFixed(0)} cone${(d.cone * 180 / Math.PI).toFixed(0)}` +
+                        ` dir${(d.dir * 180 / Math.PI).toFixed(0)} pitch${(d.pitch * 180 / Math.PI).toFixed(0)}` +
+                        ` on${d.on} y${h.y.toFixed(2)}`;
+                });
+                lines.push(key + ' x' + list.length + ': ' + sample.join(' | '));
+            }
+            return lines.join(' || ');
+        },
+    });
     game.cheats.add({
         name: 'map',
         args: 'night|day',

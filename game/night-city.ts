@@ -1,4 +1,4 @@
-import { curbFitting, GARAGE_PROPS, LANTERN_HEIGHT, LANTERNS, MIN_BIN_GAP, MIN_PARK_GAP, parkGap, POST, POST_SPACING, serviceGap, streetGap, streetGroup } from './night-props.js';
+import { CURB_FITTING, DRAIN_FITTING, DRAIN_SPACING, GARAGE_PROPS, LANTERN_HEIGHT, LANTERNS, MIN_BIN_GAP, MIN_PARK_GAP, parkGap, POST, POST_SPACING, PRODUCT_GLOW, PRODUCT_LIGHTS, serviceGap, streetGap, streetGroup, type Glow, type PropLight } from './night-props.js';
 import { facadeLights, garageBays } from './building-lights.js';
 import { buildingSize, frontage, tower, type Building } from './buildings.js';
 import { game } from './engine.js';
@@ -41,6 +41,10 @@ const GAP_FENCE_SLAT = 0.42;
 const GAP_FENCE_TINT = '#5b6784';
 const GAP_FENCE_EMISSIVE = 0.18;
 const GAP_GROUND_Y = -0.02;
+// One knob for every lamp a prop carries: 0 switches them all off (an A/B check).
+const PROP_LIGHT_GAIN = 1;
+// How many local lights reach the renderer per frame, nearest first.
+const LIGHT_BUDGET = 160;
 const NIGHT_ROWS = [{ offset: 0, scale: 1 }, { offset: 23, scale: 1 }, { offset: 44, scale: 1.25 }];
 const ROAD_TINT = { retail: '#35363d', residential: '#31343d', industrial: '#30343a' };
 const FACADE_FILL = 0.42;
@@ -51,6 +55,13 @@ const NAMEPLATE_LIGHT = { radius: 6.5, intensity: 12 };
 const ROAD_LOD_DISTANCES = [36, 76];
 const PAVING_LOD_DISTANCES = [33, 67];
 const BRIDGE_LOD_DISTANCES = [62, 120];
+// Road surfaces are LIT: prop lamps and the sky reach them, so a curb spot draws
+// a pool on the tarmac. The emissive term is what keeps the painted brightness
+// the unlit version had, and it is what the reflections were standing in for.
+type Surface = { lit?: boolean; emissive?: number; rough?: number };
+const ROAD_SURFACE: Surface = { lit: true, emissive: 0.52, rough: 0.64 };
+const PAVING_SURFACE: Surface = { lit: true, rough: 0.92 };
+const CURB_SURFACE: Surface = { lit: true, emissive: 0.24, rough: 0.85 };
 type Fragment = {
     section: RoadSection;
     start: number;
@@ -61,6 +72,14 @@ type Fragment = {
 };
 type Parts = ReturnType<typeof game.modelFiles.spawn>['parts'];
 type InstancePool = ReturnType<typeof makeInstancePool>;
+// A prop's lamp, carried by the piece: its spot in route space, then moved with the
+// piece each frame the way its parts are.
+type PlacedLight = {
+    obj: ReturnType<typeof game.lights.add>;
+    x: number;
+    z: number;
+    y: number;
+};
 type Piece = {
     parts: Parts;
     x: number;
@@ -69,11 +88,13 @@ type Piece = {
     textures?: number[];
     thresholds?: number[];
     light?: ReturnType<typeof game.lights.add>;
+    lights?: PlacedLight[];
     key: string;
     fresh: boolean;
 };
 
 type Vertex = [number, number, number, number, number, number, number, number];
+const DEGREES = Math.PI / 180;
 function mod(n: number, m: number) {
     return ((n % m) + m) % m;
 }
@@ -89,6 +110,7 @@ function makeInstancePool() {
     function release(piece: Piece): void {
         for (const part of piece.parts) part.visible = false;
         if (piece.light) piece.light.light3d.on = 0;
+        for (const light of piece.lights ?? []) light.obj.light3d.on = 0;
         piece.textures = undefined;
         piece.thresholds = undefined;
         let bank = available.get(piece.key);
@@ -303,9 +325,12 @@ function dress(fragment: Fragment, pool: InstancePool, route: NightRoute): void 
     const length = end - start;
     const origin = sampleSection(section, (start + end) / 2);
     ribbon(fragment, origin);
-    function surface(name: string, color: string, texture?: string, thresholds?: number[], bridge = false) {
+    function surface(name: string, color: string, texture?: string, thresholds?: number[], bridge = false,
+        surface3d: Surface = {}) {
         const mesh = bridge ? 'night-crossing-shell' : 'night-' + name + slot;
-        const piece = pool.take(mesh, id => [game.spawn({ id, mesh, unlit: name !== 'paving', rough: 0.92 })]);
+        const { lit = false, emissive = 0, rough = 0.92 } = surface3d;
+        // `unlit` and the material are fixed at spawn, so each surface keeps its own.
+        const piece = pool.take(mesh, id => [game.spawn({ id, mesh, unlit: !lit, emissive, rough })]);
         piece.x = origin.x;
         piece.z = origin.z;
         piece.yaw = bridge ? origin.heading : 0;
@@ -325,22 +350,68 @@ function dress(fragment: Fragment, pool: InstancePool, route: NightRoute): void 
         fragment.pieces.push(piece);
     }
     const tileSeed = routeHash(section.environment.seed ^ Math.imul(tile, 0x1b873593));
-    surface('deck', ROAD_TINT[section.road.surface], 'night-road', ROAD_LOD_DISTANCES);
-    surface('paving', '#c6c9d1', 'night-paving', PAVING_LOD_DISTANCES);
-    surface('curb', '#05070b');
+    surface('deck', ROAD_TINT[section.road.surface], 'night-road', ROAD_LOD_DISTANCES, false, ROAD_SURFACE);
+    surface('paving', '#c6c9d1', 'night-paving', PAVING_LOD_DISTANCES, false, PAVING_SURFACE);
+    surface('curb', '#05070b', undefined, undefined, false, CURB_SURFACE);
     surface('ground', '#020305');
     function modelAt(model: string, x: number, z: number, yaw: number, floor: number,
-        { width, centreY, garage = false }: { width?: number; centreY?: number; garage?: boolean } = {}) {
-        const size = game.modelFiles.get(model)!.size;
+        { width, centreY, garage = false, lights, glow }:
+            { width?: number; centreY?: number; garage?: boolean; lights?: PropLight[]; glow?: Glow[] } = {}) {
+        const definition = game.modelFiles.get(model)!;
+        const size = definition.size;
         const span = Math.max(size.x, size.y, size.z);
-        const item = pool.take(garage ? 'garage-' + model : model, id => game.modelFiles.spawn(model, {
+        // The key carries the lamps and the burning parts, so a lit prop never
+        // reuses a dark piece.
+        const key = (garage ? 'garage-' : '') + model +
+            (lights?.length ? '|' + lights.map(light => light.color + ':' + light.radius).join(',') : '') +
+            (glow?.length ? '|' + glow.map(part => part.part + ':' + part.color).join(',') : '');
+        const item = pool.take(key, id => game.modelFiles.spawn(model, {
             id, size: span, tags: garage ? ['street-prop', 'garage-prop'] : ['street-prop'],
         }).parts);
         Object.assign(item, { x, z, yaw, fresh: true });
-        for (const part of item.parts) {
-            part.y = centreY ?? floor + size.y / 2;
+        const centre = centreY ?? floor + size.y / 2;
+        for (const [index, part] of item.parts.entries()) {
+            part.y = centre;
             part.sx = width === undefined ? span : (span * width) / size.x;
             part.visible = true;
+            if (!glow?.length) continue;
+            // A handle wears the model part of the same index; its material name
+            // says which surface burns, and the tint gives that burn its colour.
+            const name = (game.world3d.materialAt(definition.parts[index].material)?.name ?? '').toLowerCase();
+            const burn = glow.find(piece => name.includes(piece.part));
+            if (burn) part.tint = burn.color;
+        }
+        // Lamps are made lit, not switched on later: `on` is set as they are added,
+        // and the placement below only moves and aims them.
+        if (!item.lights)
+            item.lights = (lights ?? []).map(light => ({
+                obj: game.lights.add({
+                    id: 'night-' + model + '-lamp',
+                    radius: light.radius,
+                    color: light.color,
+                    intensity: light.intensity * PROP_LIGHT_GAIN,
+                    cone: light.cone,
+                    innerCone: light.innerCone,
+                    pitch: light.pitch,
+                }),
+                x: 0,
+                z: 0,
+                y: 0,
+            }));
+        const cos = Math.cos(yaw), sin = Math.sin(yaw);
+        for (const [index, placed] of item.lights.entries()) {
+            const light = lights?.[index];
+            if (!light) {
+                placed.obj.light3d.on = 0;
+                continue;
+            }
+            const [ox, oy, oz] = light.offset;
+            placed.x = x + ox * cos - oz * sin;
+            placed.z = z + ox * sin + oz * cos;
+            placed.y = centre + oy;
+            // A spot's yaw is a world angle, so it follows the prop's own facing.
+            placed.obj.light3d.dir = yaw + (light.dir ?? 0) * DEGREES;
+            placed.obj.light3d.on = 1;
         }
         fragment.pieces.push(item);
     }
@@ -385,7 +456,7 @@ function dress(fragment: Fragment, pool: InstancePool, route: NightRoute): void 
     function propAt(prop: ReturnType<typeof streetGroup>[number], distance: number, side: number) {
         const at = sidewalk(distance - side * (prop.along ?? 0), side, prop.depth);
         modelAt(prop.model, at.x, at.z, at.heading + side * Math.PI / 2 + (prop.turn ?? 0),
-            CURB + (prop.base ?? 0), { width: prop.width });
+            CURB + (prop.base ?? 0), { width: prop.width, lights: prop.lights, glow: prop.glow });
     }
     const nextSection = route.sectionFor(end);
     const nextEnd = Math.min(nextSection.end, (Math.floor(end / TILE) + 1) * TILE);
@@ -462,7 +533,12 @@ function dress(fragment: Fragment, pool: InstancePool, route: NightRoute): void 
                     const offset = bayWidth / 2 - (halfWidth + GARAGE_PROP_CLEARANCE) / scale;
                     const depth = GARAGE_THRESHOLD - (halfDepth + GARAGE_PROP_CLEARANCE) / scale;
                     const at = position(x - fit.cx - side * offset, depth - fit.cz);
-                    modelAt(model, at.x, at.z, piece.yaw - side * turn, GARAGE_FLOOR * scale - 0.02, { garage: true });
+                    // The products machine lights its cabinet white; the scooter carries nothing.
+                    modelAt(model, at.x, at.z, piece.yaw - side * turn, GARAGE_FLOOR * scale - 0.02, {
+                        garage: true,
+                        lights: model === 'vending-machine' ? PRODUCT_LIGHTS : undefined,
+                        glow: model === 'vending-machine' ? PRODUCT_GLOW : undefined,
+                    });
                 }
             }
             const shopColor = DOOR_LIGHTS[routeHash(seed ^ 0x85ebca6b) % DOOR_LIGHTS.length];
@@ -512,8 +588,12 @@ function dress(fragment: Fragment, pool: InstancePool, route: NightRoute): void 
             const distance = (index + 0.5) * POST_SPACING;
             propAt(POST, distance, side);
         }
+        // Lit curb strips share the post spacing, offset so the two alternate.
         for (let index = Math.ceil(start / POST_SPACING); index * POST_SPACING < end; index++)
-            propAt(curbFitting(routeHash(seed + index)), index * POST_SPACING, side);
+            propAt(CURB_FITTING, index * POST_SPACING, side);
+        // Drains carry no light, so they keep a denser cadence of their own.
+        for (let index = Math.ceil(start / DRAIN_SPACING); index * DRAIN_SPACING < end; index++)
+            propAt(DRAIN_FITTING, index * DRAIN_SPACING, side);
         const next = frontageLot(nextSection, end, nextEnd, side);
         // Own the open space after this frontage up to the next one, even across section seams.
         const gapStart = lot.halfWidth ? lot.centre + lot.halfWidth : start;
@@ -555,6 +635,8 @@ export function buildNightCity(route: NightRoute) {
     // Sample opaque paint for caps and undersides, and reserve the patterned UVs for vertical panels.
     defineCladBox('night-crossing-shell', 'front', 2 / 64, 53 / 64);
     defineSignBox();
+    // Street lamps double the number of local lights: keep headroom for the shop neon too.
+    game.lights.max = LIGHT_BUDGET;
     game.background.picture('night-sky', 'stretch');
     game.render3d.lighting.preset('night');
     game.render3d.lighting.set({
@@ -656,6 +738,13 @@ export function buildNightCity(route: NightRoute) {
                     }
                     if (piece.fresh) obj.snap();
                     objects++;
+                }
+                for (const light of piece.lights ?? []) {
+                    const lx = light.x - here.x, lz = light.z - here.z;
+                    light.obj.x = lx * here.cos + lz * here.sin;
+                    light.obj.z = -lx * here.sin + lz * here.cos;
+                    light.obj.y = light.y;
+                    if (piece.fresh) light.obj.snap();
                 }
                 piece.fresh = false;
             }

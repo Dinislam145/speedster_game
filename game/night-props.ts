@@ -9,6 +9,108 @@ type Placement = {
     base?: number;
     turn?: number;
     width?: number;
+    lights?: PropLight[];
+    glow?: Glow[];
+};
+/**
+ * A lamp a prop carries. The offset is from the model's centre in metres —
+ * `+x` right, `+y` up, `+z` out of its front — so the light sits on the bulb it
+ * belongs to instead of at the prop's origin.
+ */
+export type PropLight = {
+    color: string;
+    radius: number;
+    intensity: number;
+    offset: [number, number, number];
+    /** Make it a spot with this outer cone half-angle, degrees. */
+    cone?: number;
+    /** Full-brightness core of a spot's cone, degrees. */
+    innerCone?: number;
+    /** Spot pitch, degrees; positive points down, so an uplight is negative. */
+    pitch?: number;
+    /** Spot yaw in degrees, measured from the prop's own front (+z). */
+    dir?: number;
+};
+/**
+ * A part of the prop that burns. The material is matched by a fragment of its
+ * name. The strength is baked into the model's surface once, at load, so the prop
+ * is alight the moment it exists — at any distance, whether or not a light of its
+ * own is near enough to be sent. The colour rides on the instance's tint, which
+ * is what lets the same cabinet burn white in a garage and warm on a street.
+ */
+export type Glow = {
+    part: string;
+    color: string;
+    strength: number;
+};
+
+const POST_LIGHTS: PropLight[] = [
+    // On the crown's diffuser band, not at the base: the glow reads from the top.
+    { color: '#ff4fa8', radius: 7, intensity: 26, offset: [0, 0.32, 0] },
+];
+const POST_GLOW: Glow[] = [{ part: 'diffuser', color: '#ff6cba', strength: 2.6 }];
+
+// The curb strip throws its light across the road, not into the ground.
+const CURB_LIGHTS: PropLight[] = [
+    {
+        color: '#4bb6ff', radius: 15, intensity: 220, offset: [0, 0.17, 0.1],
+        cone: 52, innerCone: 22, pitch: 9, dir: 0,
+    },
+];
+const CURB_GLOW: Glow[] = [{ part: 'diffuser', color: '#5cc2ff', strength: 2.4 }];
+// A street drinks machine reads as the coffee machine: an ordinary warm lamp.
+const COFFEE_LIGHTS: PropLight[] = [
+    { color: '#ffd8a6', radius: 5, intensity: 12, offset: [0, 0.2, 0.42] },
+];
+const COFFEE_GLOW: Glow[] = [
+    { part: 'shelf', color: '#ffe3b8', strength: 1.8 },
+    { part: 'display', color: '#fff0d8', strength: 1.0 },
+];
+// The garage machine is the products one: a white cabinet light.
+export const PRODUCT_LIGHTS: PropLight[] = [
+    { color: '#eaf4ff', radius: 5, intensity: 14, offset: [0, 0.2, 0.3] },
+];
+export const PRODUCT_GLOW: Glow[] = [
+    { part: 'shelf', color: '#eaf4ff', strength: 2.2 },
+    { part: 'display', color: '#e6f1ff', strength: 1.2 },
+];
+const RAMEN_LIGHTS: PropLight[] = [
+    { color: '#ffc83d', radius: 8, intensity: 24, offset: [0, 1.24, 0.32] },
+    { color: '#ff7a1f', radius: 4.5, intensity: 10, offset: [-0.55, 0.51, 0.42] },
+    { color: '#ff7a1f', radius: 4.5, intensity: 10, offset: [0.55, 0.51, 0.42] },
+];
+const RAMEN_GLOW: Glow[] = [
+    { part: 'paper_lamps', color: '#ff9a3d', strength: 2.4 },
+    { part: 'bowl_sign', color: '#ffcf55', strength: 1.6 },
+];
+const MINIMART_LIGHTS: PropLight[] = [
+    { color: '#fff1cf', radius: 9, intensity: 32, offset: [0, -0.15, 0.5] },
+];
+const MINIMART_GLOW: Glow[] = [
+    { part: 'glazing', color: '#fff3d6', strength: 1.8 },
+    { part: 'sign_24h', color: '#fff3d6', strength: 1.5 },
+];
+// Every sakura gets a cool uplight in its crown, aimed up and a little out.
+const TREE_LIGHTS: PropLight[] = [
+    { color: '#5fa8ff', radius: 6.5, intensity: 48, offset: [0, -1.45, 0.25], cone: 32, pitch: -78 },
+];
+// The surfaces that burn, by model. The strength here is baked into the model
+// once it is loaded; the placements below choose the tint each instance wears.
+const MODEL_GLOW: Record<string, Glow[]> = {
+    'illuminated-bollard': [{ part: 'diffuser', color: '#ff6cba', strength: 2.6 }],
+    'curb-light': [{ part: 'diffuser', color: '#5cc2ff', strength: 2.4 }],
+    'vending-machine': [
+        { part: 'shelf', color: '#eaf0ff', strength: 2.2 },
+        { part: 'display', color: '#e6f1ff', strength: 1.2 },
+    ],
+    'ramen-counter-facade': [
+        { part: 'paper_lamps', color: '#ff9a3d', strength: 2.4 },
+        { part: 'bowl_sign', color: '#ffcf55', strength: 1.6 },
+    ],
+    'minimart-facade': [
+        { part: 'glazing', color: '#fff3d6', strength: 1.8 },
+        { part: 'sign_24h', color: '#fff3d6', strength: 1.5 },
+    ],
 };
 const BENCH_PLANTER_OFFSET = 1.28;
 const BIN_DEPTH = 0.52;
@@ -24,11 +126,15 @@ const MIN_DOUBLE_BENCH_GAP = 7.8;
 const PARK_BENCH_DEPTH = -0.55;
 const PARK_TREE_DEPTH = -2.05;
 const PARK_BENCH_SPACING = 3.35;
-export const POST_SPACING = 6;
+export const POST_SPACING = 30;
+// Drains are paving rather than light: they keep the old, denser cadence.
+export const DRAIN_SPACING = 18;
 export const LANTERNS = 'market-lantern-string';
 export const LANTERN_HEIGHT = 8.8;
 export const GARAGE_PROPS = ['vending-machine', 'parked-scooter'] as const;
-export const POST: Placement = { model: 'illuminated-bollard', depth: 2.37 };
+export const POST: Placement = {
+    model: 'illuminated-bollard', depth: 2.37, lights: POST_LIGHTS, glow: POST_GLOW,
+};
 // The alley between two frontages is dressed in depth bands, so the lot behind the
 // sidewalk never reads as bare ground.
 const GAP_FLOOR = -0.15;
@@ -44,7 +150,7 @@ const GAP_BENCH_MIN_WIDTH = 4.6;
 const GAP_YARD_DEPTHS = [-4.1, -5.6];
 const GROUPS = {
     ramen: [
-        { model: 'ramen-counter-facade', depth: 0.44 },
+        { model: 'ramen-counter-facade', depth: 0.44, lights: RAMEN_LIGHTS, glow: RAMEN_GLOW },
         { model: 'menu-board', along: 2.05, depth: 1.28, turn: 0.23 },
     ],
     bar: [
@@ -52,11 +158,11 @@ const GROUPS = {
         { model: 'menu-board', along: 1.46, depth: 1.06, turn: -0.18 },
     ],
     market: [
-        { model: 'minimart-facade', depth: 0.28 },
+        { model: 'minimart-facade', depth: 0.28, lights: MINIMART_LIGHTS, glow: MINIMART_GLOW },
         { model: 'delivery-crate', along: 2.42, depth: 0.42 },
     ],
     pharmacy: [{ model: 'pharmacy-blade-sign', depth: 0.06, base: 2.85, turn: -Math.PI / 2 }],
-    drinks: [{ model: 'vending-machine', depth: 0.37 }],
+    drinks: [{ model: 'vending-machine', depth: 0.37, lights: COFFEE_LIGHTS, glow: COFFEE_GLOW }],
     rest: [
         { model: 'slatted-bench', depth: 0.46 },
         { model: 'leaf-planter', depth: 0.46, along: -BENCH_PLANTER_OFFSET },
@@ -68,9 +174,9 @@ const GROUPS = {
     refuse: [{ model: 'recycling-bin', depth: BIN_DEPTH }],
     bags: [{ model: 'tied-trash-bag', depth: BIN_DEPTH }],
     drain: [{ model: 'storm-drain', depth: 2.45, base: -0.021 }],
-    curb: [{ model: 'curb-light', depth: 2.72, base: -0.143 }],
+    curb: [{ model: 'curb-light', depth: 2.72, base: -0.143, lights: CURB_LIGHTS, glow: CURB_GLOW }],
     paving: [{ model: 'paving-module', depth: -1.38, base: -0.15 }],
-    tree: [{ model: 'flowering-street-tree', depth: 1.45 }],
+    tree: [{ model: 'flowering-street-tree', depth: 1.45, lights: TREE_LIGHTS }],
 } satisfies Record<string, Placement[]>;
 type Group = keyof typeof GROUPS;
 type Layout = { primary: Group[]; opposite: Group[] };
@@ -172,6 +278,7 @@ export function parkGap(seed: number, width: number): Placement[] {
             depth: depth + 0.4,
             base: GAP_FLOOR,
             turn: (routeHash(row + Math.round(along * 10)) % GAP_TREE_TURNS) * Math.PI / GAP_TREE_TURNS,
+            lights: TREE_LIGHTS,
         });
         if (columns === 1) tree((row & 1 ? 1 : -1) * rim * (0.75 + ((row >>> 8) % 25) / 100));
         else for (let column = 0; column < columns; column++) {
@@ -210,12 +317,28 @@ export function serviceGap(seed: number, width: number): Placement[] {
     ];
 }
 
-export function curbFitting(seed: number): Placement {
-    return seed % 3 === 0 ? GROUPS.drain[0] : GROUPS.curb[0];
-}
+// The glowing curb strip and the storm drain, placed on their own cadences.
+export const CURB_FITTING: Placement = GROUPS.curb[0];
+export const DRAIN_FITTING: Placement = GROUPS.drain[0];
 
-export function loadNightProps() {
+export async function loadNightProps() {
     const models = new Set(Object.values(GROUPS).flat().map(p => p.model));
     for (const key of [LANTERNS, POST.model, ...GARAGE_PROPS]) models.add(key);
-    return Promise.all(Array.from(models, key => game.modelFiles.load(key, 'assets/world/night_city/' + key + '.glb')));
+    await Promise.all(Array.from(models, key =>
+        game.modelFiles.load(key, 'assets/world/night_city/' + key + '.glb')));
+    for (const [key, glow] of Object.entries(MODEL_GLOW)) bakeGlow(key, glow);
+}
+
+// A material is a surface many things share, so one write here lights every
+// instance of the model: the prop glows from the frame it is spawned on.
+function bakeGlow(key: string, glow: Glow[]): void {
+    const model = game.modelFiles.get(key);
+    if (!model) return;
+    for (const part of model.parts) {
+        const material = game.world3d.materialAt(part.material);
+        if (!material) continue;
+        const name = material.name.toLowerCase();
+        const burn = glow.find(piece => name.includes(piece.part));
+        if (burn) material.emissive = Math.max(material.emissive, burn.strength);
+    }
 }
