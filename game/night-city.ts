@@ -1,4 +1,5 @@
-import { facadeLights } from './building-lights.js';
+import { curbFitting, GARAGE_PROPS, LANTERN_HEIGHT, LANTERNS, MIN_PARK_GAP, POST, POST_SPACING, streetGap, streetGroup } from './night-props.js';
+import { facadeLights, GARAGE_BAYS } from './building-lights.js';
 import { buildingSize, frontage, tower, type Building } from './buildings.js';
 import { game } from './engine.js';
 import { DOOR_LIGHTS, NAMES, NEON, NIGHT_HAZE, signFrames, streetFrames } from './night-art.js';
@@ -23,6 +24,12 @@ const SIGN_LOD_DISTANCES = [47, 88, 149];
 const SIGN_COUNTS = { retail: 3, residential: 1, industrial: 2 };
 const LOT_GAP = 1.2;
 const MIN_LOT_SCALE = 0.75;
+const GAP_EDGE_MARGIN = 0.25;
+const PARK_LANTERN_SETBACK = 2.1;
+const GARAGE_THRESHOLD = 4.54;
+const GARAGE_PROP_CLEARANCE = 0.06;
+const GARAGE_FLOOR = 0.18;
+const GARAGE_PROP_YAW = [Math.PI / 4, Math.PI / 2];
 const NIGHT_ROWS = [{ offset: 0, scale: 1 }, { offset: 23, scale: 1 }, { offset: 44, scale: 1.25 }];
 const ROAD_TINT = { retail: '#35363d', residential: '#31343d', industrial: '#30343a' };
 const FACADE_FILL = 0.42;
@@ -237,7 +244,21 @@ function spawnNightBuilding(key: Building, id: string): Parts {
     });
 }
 
-function dress(fragment: Fragment, pool: InstancePool): void {
+function frontageLot(section: RoadSection, start: number, end: number, side: number) {
+    const centre = (start + end) / 2;
+    const origin = sampleSection(section, centre);
+    const tileSeed = routeHash(section.environment.seed ^ Math.imul(Math.floor(start / TILE), 0x1b873593));
+    const seed = routeHash(tileSeed ^ Math.imul(side, 0x27d4eb2d));
+    const key = frontage(section.environment.district, seed);
+    const size = buildingSize(key);
+    const innerEdge = origin.width / 2 + WALK + size.z;
+    const roadToLot = 1 - innerEdge / NIGHT_PROFILE.radius[0];
+    const scale = Math.min(1, ((end - start) * roadToLot - LOT_GAP) / size.x);
+    const halfWidth = scale >= MIN_LOT_SCALE ? size.x * scale / (2 * roadToLot) : 0;
+    return { centre, origin, seed, key, scale, halfWidth, wallHalfWidth: size.x * scale / 2 };
+}
+
+function dress(fragment: Fragment, pool: InstancePool, route: NightRoute): void {
     const { section, slot, tile, start, end } = fragment;
     const length = end - start;
     const origin = sampleSection(section, (start + end) / 2);
@@ -268,17 +289,64 @@ function dress(fragment: Fragment, pool: InstancePool): void {
     surface('paving', '#c6c9d1', 'night-paving', PAVING_LOD_DISTANCES);
     surface('curb', '#05070b');
     surface('ground', '#020305');
+    function modelAt(model: string, x: number, z: number, yaw: number, floor: number,
+        { width, centreY, garage = false }: { width?: number; centreY?: number; garage?: boolean } = {}) {
+        const size = game.modelFiles.get(model)!.size;
+        const span = Math.max(size.x, size.y, size.z);
+        const item = pool.take(garage ? 'garage-' + model : model, id => game.modelFiles.spawn(model, {
+            id, size: span, tags: garage ? ['street-prop', 'garage-prop'] : ['street-prop'],
+        }).parts);
+        Object.assign(item, { x, z, yaw, fresh: true });
+        for (const part of item.parts) {
+            part.y = centreY ?? floor + size.y / 2;
+            part.sx = width === undefined ? span : (span * width) / size.x;
+            part.visible = true;
+        }
+        fragment.pieces.push(item);
+    }
+    function stretchLanterns(from: { x: number; z: number }, to: { x: number; z: number }) {
+        const dx = to.x - from.x, dz = to.z - from.z;
+        const span = Math.hypot(dx, dz);
+        const count = Math.max(1, Math.round(span / game.modelFiles.get(LANTERNS)!.size.x));
+        const yaw = Math.atan2(dz, dx);
+        for (let i = 0; i < count; i++) {
+            const t = (i + 0.5) / count;
+            modelAt(LANTERNS, from.x + t * dx, from.z + t * dz, yaw, 0,
+                { width: span / count, centreY: LANTERN_HEIGHT });
+        }
+    }
+    function sidewalk(distance: number, side: number, depth: number) {
+        const at = distance < end ? sampleSection(section, distance) : route.sampleRoad(distance);
+        const across = side * (at.width / 2 + WALK - depth);
+        return { x: at.x + at.cos * across, z: at.z + at.sin * across, heading: at.heading };
+    }
+    function parkAnchor(lot: ReturnType<typeof frontageLot>, side: number, direction: number) {
+        const at = lot.origin;
+        const across = side * (at.width / 2 + WALK + PARK_LANTERN_SETBACK);
+        const along = direction * lot.wallHalfWidth;
+        return { x: at.x + at.cos * across + at.sin * along, z: at.z + at.sin * across - at.cos * along };
+    }
+    function propAt(prop: ReturnType<typeof streetGroup>[number], distance: number, side: number) {
+        const at = sidewalk(distance - side * (prop.along ?? 0), side, prop.depth);
+        modelAt(prop.model, at.x, at.z, at.heading + side * Math.PI / 2 + (prop.turn ?? 0),
+            CURB + (prop.base ?? 0), { width: prop.width });
+    }
+    const nextSection = route.sectionFor(end);
+    const nextEnd = Math.min(nextSection.end, (Math.floor(end / TILE) + 1) * TILE);
     let frontages = 0;
     for (const side of [-1, 1]) {
-        const seed = routeHash(tileSeed ^ Math.imul(side, 0x27d4eb2d));
+        const lot = frontageLot(section, start, end, side);
+        const { seed } = lot;
+        let lotWidth = 0;
+        let garage = false;
         for (const [row, layout] of NIGHT_ROWS.entries()) {
-            const key = row === 0 ? frontage(section.environment.district, seed) : tower(routeHash(seed + row));
+            const key = row === 0 ? lot.key : tower(routeHash(seed + row));
             const size = buildingSize(key);
             const setback = origin.width / 2 + WALK + layout.offset;
             // On the inside of a bend, successive lots are closer than their road centres.
             const innerEdge = setback + size.z * layout.scale;
             const room = length * (1 - innerEdge / NIGHT_PROFILE.radius[0]) - LOT_GAP;
-            const scale = Math.min(layout.scale, room / size.x);
+            const scale = row === 0 ? lot.scale : Math.min(layout.scale, room / size.x);
             if (scale < MIN_LOT_SCALE) continue;
             const offset = side * (setback + size.z * scale / 2);
             const piece = pool.take(key, id => spawnNightBuilding(key, id));
@@ -322,6 +390,22 @@ function dress(fragment: Fragment, pool: InstancePool): void {
                 '#ffffff', [game.assets.frame('night-window-glow').index]);
             if (row !== 0) continue;
             frontages++;
+            lotWidth = size.x * scale;
+            garage = key.startsWith('depot_');
+            if (garage) {
+                for (const [index, [x, , , bayWidth]] of GARAGE_BAYS.entries()) {
+                    const variant = routeHash(seed + index) % GARAGE_PROPS.length;
+                    const model = GARAGE_PROPS[variant];
+                    const dimensions = game.modelFiles.get(model)!.size;
+                    const turn = GARAGE_PROP_YAW[variant];
+                    const halfWidth = (dimensions.x * Math.cos(turn) + dimensions.z * Math.sin(turn)) / 2;
+                    const halfDepth = (dimensions.x * Math.sin(turn) + dimensions.z * Math.cos(turn)) / 2;
+                    const offset = bayWidth / 2 - (halfWidth + GARAGE_PROP_CLEARANCE) / scale;
+                    const depth = GARAGE_THRESHOLD - (halfDepth + GARAGE_PROP_CLEARANCE) / scale;
+                    const at = position(x - fit.cx - side * offset, depth - fit.cz);
+                    modelAt(model, at.x, at.z, piece.yaw - side * turn, GARAGE_FLOOR * scale - 0.02, { garage: true });
+                }
+            }
             const shopColor = DOOR_LIGHTS[routeHash(seed ^ 0x85ebca6b) % DOOR_LIGHTS.length];
             if (lights.entry) {
                 detail(lights.entry, 'storefront', -fit.cx, 0, -fit.cz, 1, 1, 1,
@@ -362,6 +446,32 @@ function dress(fragment: Fragment, pool: InstancePool): void {
                 }
             }
         }
+        for (const prop of streetGroup(section.environment.district, seed, garage, lotWidth))
+            propAt(prop, lot.centre, side);
+        // Distances belong to the route, with each fragment owning [start, end).
+        for (let index = Math.ceil(start / POST_SPACING - 0.5); (index + 0.5) * POST_SPACING < end; index++) {
+            const distance = (index + 0.5) * POST_SPACING;
+            propAt(POST, distance, side);
+        }
+        for (let index = Math.ceil(start / POST_SPACING); index * POST_SPACING < end; index++)
+            propAt(curbFitting(routeHash(seed + index)), index * POST_SPACING, side);
+        const next = frontageLot(nextSection, end, nextEnd, side);
+        // Own the open space after this frontage up to the next one, even across section seams.
+        const gapStart = lot.halfWidth ? lot.centre + lot.halfWidth : start;
+        const gapEnd = next.halfWidth ? next.centre - next.halfWidth : end;
+        const width = gapEnd - gapStart - 2 * GAP_EDGE_MARGIN;
+        const industrial = section.environment.district === 'industrial' || garage ||
+            (next.halfWidth > 0 && next.key.startsWith('depot_'));
+        for (const prop of streetGap(industrial, seed, width)) propAt(prop, (gapStart + gapEnd) / 2, side);
+        if (!industrial && lot.halfWidth && next.halfWidth && width >= MIN_PARK_GAP) {
+            stretchLanterns(parkAnchor(lot, side, 1), parkAnchor(next, side, -1));
+        }
+    }
+    // Join short strands at their fittings so the lanterns retain their proportions across a wide road.
+    if (frontages === 2 && section.environment.district === 'retail' && length >= 18 &&
+        mod(tile, 9) !== 4 && routeHash(tileSeed + 37) % 3 !== 0) {
+        const centre = (start + end) / 2;
+        stretchLanterns(sidewalk(centre, -1, 0), sidewalk(centre, 1, 0));
     }
     if (frontages === 2 && length >= 18 && mod(tile, 9) === 4)
         surface('skybridge', '#101218', 'night-crossing', BRIDGE_LOD_DISTANCES, true);
@@ -446,7 +556,7 @@ export function buildNightCity(route: NightRoute) {
                 pieces: [],
             };
             // Publish each fragment only after its buildings, light panels and reflections are ready.
-            dress(fragment, pool);
+            dress(fragment, pool, route);
             fragments.push(fragment);
             loaded++;
             cursor = end;

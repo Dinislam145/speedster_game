@@ -39,6 +39,24 @@
     "assets/depot_middle.glb",
     "assets/depot_outer.glb",
     "assets/prism.glb",
-    "assets/spire.glb"
+    "assets/spire.glb",
+    "assets/world/night_city/curb-light.glb",
+    "assets/world/night_city/delivery-crate.glb",
+    "assets/world/night_city/flowering-street-tree.glb",
+    "assets/world/night_city/illuminated-bollard.glb",
+    "assets/world/night_city/leaf-planter.glb",
+    "assets/world/night_city/market-lantern-string.glb",
+    "assets/world/night_city/menu-board.glb",
+    "assets/world/night_city/minimart-facade.glb",
+    "assets/world/night_city/parked-scooter.glb",
+    "assets/world/night_city/paving-module.glb",
+    "assets/world/night_city/pharmacy-blade-sign.glb",
+    "assets/world/night_city/ramen-counter-facade.glb",
+    "assets/world/night_city/recycling-bin.glb",
+    "assets/world/night_city/slatted-bench.glb",
+    "assets/world/night_city/storm-drain.glb",
+    "assets/world/night_city/takeaway-bar-facade.glb",
+    "assets/world/night_city/tied-trash-bag.glb",
+    "assets/world/night_city/vending-machine.glb"
   ]
 }

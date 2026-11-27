@@ -1,4 +1,5 @@
 import { game } from './engine.js';
+import { loadNightProps } from './night-props.js';
 import { loadBuildings } from './buildings.js';
 import assets from './assets.json';
 import { prepareNightArt } from './night-art.js';
@@ -14,7 +15,7 @@ await game.assets.load([
 makeArt();
 prepareNightArt();
 prepareInterface();
-await Promise.all([loadBuildings(), game.assets.load(assets, { pack: 'title' }), game.modelFiles.load('kestrel', 'assets/kestrel.glb')]);
+await Promise.all([loadBuildings(), loadNightProps(), game.assets.load(assets, { pack: 'title' }), game.modelFiles.load('kestrel', 'assets/kestrel.glb')]);
 game.scenes.register(Title);
 game.scenes.register(Play);
 game.scenes.register(Pause);

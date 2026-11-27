@@ -13,6 +13,9 @@ const WINDOW_GLASS_OFFSET = 0.505;
 const SHOP_GLASS_OFFSET = 0.905;
 const geometry = new Map<Building, { windows: string[][]; entry: string | undefined }>();
 
+// All shutter variants share the same three bays.
+export const GARAGE_BAYS = openings.depot_all.entries;
+
 function paneMesh(name: string, panes: Pane[], faceOffset = 0): string | undefined {
     if (!panes.length) return undefined;
     const verts: number[] = [];
