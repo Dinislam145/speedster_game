@@ -1,5 +1,5 @@
 import { facadeLights } from './building-lights.js';
-import { buildingSize, frontage, spawnBuilding, tower } from './buildings.js';
+import { buildingSize, frontage, tower, type Building } from './buildings.js';
 import { game } from './engine.js';
 import { DOOR_LIGHTS, NAMES, NEON, NIGHT_HAZE, signFrames, streetFrames } from './night-art.js';
 import {
@@ -25,10 +25,11 @@ const LOT_GAP = 1.2;
 const MIN_LOT_SCALE = 0.75;
 const NIGHT_ROWS = [{ offset: 0, scale: 1 }, { offset: 23, scale: 1 }, { offset: 44, scale: 1.25 }];
 const ROAD_TINT = { retail: '#35363d', residential: '#31343d', industrial: '#30343a' };
+const FACADE_FILL = 0.42;
 const MARQUEE_TINT = '#bfc4d1';
 const NAMEPLATE_TINT = '#858b99';
-const MARQUEE_LIGHT = { radius: 6, intensity: 16 };
-const NAMEPLATE_LIGHT = { radius: 3.8, intensity: 7 };
+const MARQUEE_LIGHT = { radius: 10, intensity: 23 };
+const NAMEPLATE_LIGHT = { radius: 6.5, intensity: 12 };
 const ROAD_LOD_DISTANCES = [36, 76];
 const PAVING_LOD_DISTANCES = [33, 67];
 const BRIDGE_LOD_DISTANCES = [62, 120];
@@ -213,6 +214,29 @@ function defineWindowSpill(
     return mesh;
 }
 
+function spawnNightBuilding(key: Building, id: string): Parts {
+    const model = game.modelFiles.get(key)!;
+    return model.parts.map((part, index) => {
+        const original = game.world3d.materialAt(part.material)!;
+        const material = game.world3d.material({
+            ...original,
+            name: 'night-facade/' + original.name,
+            // Keep dark enamel textured between pools of neon light.
+            emissive: original.emissive + FACADE_FILL,
+        });
+        const obj = game.spawn({
+            id: model.parts.length === 1 ? id : id + '#' + index,
+            tags: ['building'],
+            mesh: part.mesh,
+            material,
+            color: part.color,
+            alpha: part.alpha,
+        });
+        obj.frame = part.frame;
+        return obj;
+    });
+}
+
 function dress(fragment: Fragment, pool: InstancePool): void {
     const { section, slot, tile, start, end } = fragment;
     const length = end - start;
@@ -220,7 +244,7 @@ function dress(fragment: Fragment, pool: InstancePool): void {
     ribbon(fragment, origin);
     function surface(name: string, color: string, texture?: string, thresholds?: number[], bridge = false) {
         const mesh = bridge ? 'night-crossing-shell' : 'night-' + name + slot;
-        const piece = pool.take(mesh, id => [game.spawn({ id, mesh, unlit: true })]);
+        const piece = pool.take(mesh, id => [game.spawn({ id, mesh, unlit: name !== 'paving', rough: 0.92 })]);
         piece.x = origin.x;
         piece.z = origin.z;
         piece.yaw = bridge ? origin.heading : 0;
@@ -241,7 +265,7 @@ function dress(fragment: Fragment, pool: InstancePool): void {
     }
     const tileSeed = routeHash(section.environment.seed ^ Math.imul(tile, 0x1b873593));
     surface('deck', ROAD_TINT[section.road.surface], 'night-road', ROAD_LOD_DISTANCES);
-    surface('paving', '#20222a', 'night-paving', PAVING_LOD_DISTANCES);
+    surface('paving', '#c6c9d1', 'night-paving', PAVING_LOD_DISTANCES);
     surface('curb', '#05070b');
     surface('ground', '#020305');
     let frontages = 0;
@@ -257,7 +281,7 @@ function dress(fragment: Fragment, pool: InstancePool): void {
             const scale = Math.min(layout.scale, room / size.x);
             if (scale < MIN_LOT_SCALE) continue;
             const offset = side * (setback + size.z * scale / 2);
-            const piece = pool.take(key, id => spawnBuilding(key, id, 1, 0, side).parts);
+            const piece = pool.take(key, id => spawnNightBuilding(key, id));
             piece.x = origin.x + offset * origin.cos;
             piece.z = origin.z + offset * origin.sin;
             piece.yaw = origin.heading + side * Math.PI / 2;
@@ -350,13 +374,14 @@ export function buildNightCity(route: NightRoute) {
     game.background.picture('night-sky', 'stretch');
     game.render3d.lighting.preset('night');
     game.render3d.lighting.set({
-        sun: { x: 0.4, y: -1, z: -0.65 },
-        sunColor: '#c6cfee',
-        sunIntensity: 0,
-        skyColor: '#8c9dc7',
-        groundColor: '#2d3547',
-        ambient: 0.08,
-        environment: 0.025,
+        // A low angled fill separates the side walls and rooflines from the dark sky.
+        sun: { x: 0.55, y: -0.75, z: -0.4 },
+        sunColor: '#a4b9ee',
+        sunIntensity: 0.12,
+        skyColor: '#bbc8e8',
+        groundColor: '#8790a9',
+        ambient: 0.32,
+        environment: 0.09,
         fogColor: NIGHT_HAZE,
         fogStart: 150,
         fogEnd: NIGHT_PROFILE.fogEnd,
