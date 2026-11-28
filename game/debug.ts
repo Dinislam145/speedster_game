@@ -1,5 +1,6 @@
 import { game } from './engine.js';
-import { CRUISE, roadCheckpoint, run, seekDrive, selectMap, selectNightRoute } from './drive.js';
+import { CRUISE, roadCheckpoint, run, seekDrive, selectMap, selectNightRoute, selectTrafficSeed } from './drive.js';
+import { toggleSafeRoute, toggleTrafficBoxes } from './traffic.js';
 import type { RouteMode } from './route.js';
 
 function jump(distance: number | undefined) {
@@ -17,6 +18,29 @@ export function addDebugControls(): void {
         lightsAll: game.lights.all.length,
         lightsMax: game.lights.max,
     }));
+    game.cheats.add({
+        name: 'traffic-seed',
+        args: 'seed|random',
+        does: 'Set the traffic seed and restart the current drive',
+        run: value => {
+            const seed = Number(value);
+            if (value !== 'random' && (!value || !Number.isInteger(seed) || seed < 0 || seed > 0xffffffff))
+                return 'Use an unsigned 32-bit seed or random';
+            selectTrafficSeed(value === 'random' ? undefined : seed);
+            if (game.scenes.current === 'play') game.scenes.go('play');
+            return 'Traffic seed ' + value;
+        },
+    });
+    game.cheats.add({
+        name: 'traffic-path',
+        does: 'Toggle the safe route on the asphalt',
+        run: () => toggleSafeRoute() ? 'Safe route visible' : 'Safe route hidden',
+    });
+    game.cheats.add({
+        name: 'traffic-boxes',
+        does: 'Show or hide NPC footprints',
+        run: () => toggleTrafficBoxes() ? 'NPC footprints visible' : 'NPC footprints hidden',
+    });
     game.cheats.add({
         name: 'probe',
         does: 'TEMP: report glow materials and spot lamps',

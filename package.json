@@ -5,6 +5,7 @@
   "description": "Speedster, a 3D antigravity highway game built with Phaser AE",
   "scripts": {
     "build": "node phaser/bin/bake.mjs build game dist",
+    "test:traffic": "node --import ./phaser/node_modules/tsx/dist/loader.mjs --test tests/traffic.test.ts",
     "smoke": "node phaser/bin/bake.mjs smoke game",
     "play": "node phaser/cli/bin/phaser-ae.mjs play",
     "look": "node phaser/bin/bake.mjs look game",

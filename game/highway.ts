@@ -1,5 +1,6 @@
 import { frontage, spawnBuilding, tower } from './buildings.js';
 import { game } from './engine.js';
+import { trafficAcross, type TrafficView } from './traffic.js';
 
 export const ROAD_WIDTH = 12;
 export const SECTION = 24, SECTION_COUNT = 13;
@@ -9,7 +10,7 @@ const CITY_FLOOR_TOP = -10;
 const DAY_DISTRICTS = ['retail', 'industrial', 'residential'] as const;
 type Piece = { mesh: Pick<ReturnType<typeof game.spawn>, 'z' | 'snap'>; offset: number };
 
-export function buildHighway() {
+export function buildHighway(drawTraffic?: TrafficView) {
     game.render3d.lighting.preset('noon');
     game.render3d.lighting.set({
         sun: { x: 0.65, y: -1, z: -0.38 },
@@ -114,10 +115,13 @@ export function buildHighway() {
             for (const x of [-1, 0, 1]) box('lamp', x, 6.36, 0.255, 0.47, 0.09, 0.02, '#93ffe0');
         }
     }
-    return (distance: number) => {
+    return (distance: number, elapsed: number) => {
         const travel = distance % CIRCUIT_LENGTH;
+        let nearest = -Infinity, farthest = Infinity;
         for (let i = 0; i < sections.length; i++) {
             const center = SECTION - ((i * SECTION - travel + CIRCUIT_LENGTH) % CIRCUIT_LENGTH);
+            nearest = Math.max(nearest, center);
+            farthest = Math.min(farthest, center);
             for (const p of sections[i]) {
                 const z = center + p.offset,
                     wrap = Math.abs(p.mesh.z - z) > SECTION;
@@ -125,6 +129,12 @@ export function buildHighway() {
                 if (wrap) p.mesh.snap();
             }
         }
-        return sections.length;
+        const traffic = drawTraffic?.(distance, elapsed, distance - nearest - SECTION / 2,
+            distance - farthest + SECTION / 2, (along, car) => ({
+                x: trafficAcross(ROAD_WIDTH, car),
+                z: distance - along,
+                yaw: 0,
+            }));
+        return { sections: sections.length, ...traffic };
     };
 }

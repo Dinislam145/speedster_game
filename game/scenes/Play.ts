@@ -5,7 +5,7 @@ import { dragReader } from '../input.js';
 export const Play = {
     name: 'play',
     enter(): void {
-        const draw = openRoad(),
+        const draw = openRoad(true),
             drag = dragReader();
         showGraphic('telemetry', 139, 79);
         const distance = game.text('0', 52, 96, {

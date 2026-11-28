@@ -2,6 +2,7 @@ import { CURB_FITTING, DRAIN_FITTING, DRAIN_SPACING, GARAGE_PROPS, LANTERN_HEIGH
 import { facadeLights, garageBays } from './building-lights.js';
 import { buildingSize, frontage, tower, type Building } from './buildings.js';
 import { game } from './engine.js';
+import { trafficAcross, type TrafficView } from './traffic.js';
 import { DOOR_LIGHTS, NAMES, NEON, NIGHT_HAZE, signFrames, streetFrames } from './night-art.js';
 import {
     CAMERA_LOOK_AHEAD,
@@ -651,7 +652,7 @@ function dress(fragment: Fragment, pool: InstancePool, route: NightRoute): void 
         surface('skybridge', '#101218', 'night-crossing', BRIDGE_LOD_DISTANCES, true);
 }
 
-export function buildNightCity(route: NightRoute) {
+export function buildNightCity(route: NightRoute, drawTraffic?: TrafficView) {
     // Sample opaque paint for caps and undersides, and reserve the patterned UVs for vertical panels.
     defineCladBox('night-crossing-shell', 'front', 2 / 64, 53 / 64);
     defineSignBox();
@@ -687,7 +688,7 @@ export function buildNightCity(route: NightRoute) {
         retired++;
     }
 
-    return (distance: number) => {
+    return (distance: number, elapsed: number) => {
         const from = Math.floor((distance - NIGHT_PROFILE.behind) / TILE) * TILE;
         const goal = distance + NIGHT_PROFILE.forward;
         route.cover(from, goal + TILE);
@@ -771,9 +772,21 @@ export function buildNightCity(route: NightRoute) {
                 piece.fresh = false;
             }
         }
+        const traffic = drawTraffic?.(distance, elapsed, from, cursor, (along, car) => {
+            const at = route.sampleRoad(along);
+            const across = trafficAcross(at.width, car);
+            const dx = at.x + at.cos * across - here.x;
+            const dz = at.z + at.sin * across - here.z;
+            return {
+                x: dx * here.cos + dz * here.sin,
+                z: -dx * here.sin + dz * here.cos,
+                yaw: at.heading - here.heading,
+            };
+        });
         return {
             sections: sections.size,
             fragments: fragments.length,
+            ...traffic,
             objects,
             allocated: pool.allocated,
             meshSlots: slots,

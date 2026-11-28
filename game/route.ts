@@ -28,7 +28,7 @@ export const NIGHT_PROFILE = {
 
 const TAU = Math.PI * 2;
 const RADIANS = TAU / 360;
-const SAMPLE_STEP = 2;
+export const ROAD_SAMPLE_STEP = 2;
 const DISTRICTS = ['retail', 'residential', 'industrial'] as const;
 const CLEARANCE = NIGHT_PROFILE.corridorHalfWidth * 2 + NIGHT_PROFILE.collisionStep;
 const MIN_PROGRESS = Math.cos(NIGHT_PROFILE.headingLimit);
@@ -121,8 +121,8 @@ function sectionAt(
             surface: environment.district,
         },
     };
-    for (let from = 0; from < choice.length; from += SAMPLE_STEP) {
-        const step = Math.min(SAMPLE_STEP, choice.length - from);
+    for (let from = 0; from < choice.length; from += ROAD_SAMPLE_STEP) {
+        const step = Math.min(ROAD_SAMPLE_STEP, choice.length - from);
         const heading = headingAt(section, from + step / 2);
         const previous = points[points.length - 1];
         points.push({ x: previous.x + Math.sin(heading) * step, z: previous.z - Math.cos(heading) * step });
@@ -132,8 +132,8 @@ function sectionAt(
 
 export function sampleSection(section: RoadSection, distance: number): RoadSample {
     const offset = Math.max(0, Math.min(section.road.length, distance - section.start));
-    const index = Math.floor(offset / SAMPLE_STEP);
-    const remainder = offset - index * SAMPLE_STEP;
+    const index = Math.floor(offset / ROAD_SAMPLE_STEP);
+    const remainder = offset - index * ROAD_SAMPLE_STEP;
     const { x, z } = section.points[index];
     const heading = headingAt(section, offset);
     const mid = headingAt(section, offset - remainder / 2);

@@ -1,6 +1,8 @@
 import { game } from './engine.js';
 import { buildHighway, ROAD_WIDTH, CIRCUIT_LENGTH } from './highway.js';
-import { spawnVehicle, CRAFT_WIDTH } from './vehicle.js';
+import { spawnVehicle } from './vehicle.js';
+import { CRAFT_BODY, CRUISE, craftLimit, distanceAt, speedAt, timeAt } from './drive-profile.js';
+import { buildTraffic, type TrafficReport } from './traffic.js';
 import { buildNightCity } from './night-city.js';
 import {
     makeRoute,
@@ -17,12 +19,15 @@ export function selectMap(map: CityMap): void {
     activeMap = map;
 }
 
-export const CRUISE = 40;
-const ACCEL_TIME = 2;
+export { CRUISE } from './drive-profile.js';
 const CAMERA_DISTANCE = 20.5,
     CAMERA_PITCH = 0.215,
     CAMERA_LAG = 10;
 let seed: number | undefined;
+let trafficSeedOverride: number | undefined;
+export function selectTrafficSeed(value?: number): void {
+    trafficSeedOverride = value;
+}
 let mode: RouteMode = 'random';
 let activeRoute: NightRoute | undefined;
 
@@ -53,6 +58,11 @@ export const run = {
     angle: 0,
     width: ROAD_WIDTH,
     fragments: 0,
+    trafficSeed: null as number | null,
+    traffic: 0,
+    trafficGap: null as number | null,
+    trafficSpeeds: [] as number[],
+    safePassage: [] as TrafficReport['safePassage'],
     objects: 0,
     allocated: 0,
     meshSlots: 0,
@@ -64,36 +74,32 @@ export const run = {
 };
 
 export function seekDrive(distance: number): void {
-    const rampDistance = (CRUISE * ACCEL_TIME) / 2;
-    run.time =
-        distance < rampDistance
-            ? Math.sqrt((2 * ACCEL_TIME * distance) / CRUISE)
-            : ACCEL_TIME + (distance - rampDistance) / CRUISE;
+    run.time = timeAt(distance);
     run.distance = distance;
-    run.speed = CRUISE * Math.min(1, run.time / ACCEL_TIME);
+    run.speed = speedAt(run.time);
     run.cycles = activeRoute ? 0 : Math.floor(distance / CIRCUIT_LENGTH);
 }
 
 export function advance(dt: number): void {
-    const before = run.speed;
     run.time += dt;
-    run.speed = CRUISE * Math.min(1, run.time / ACCEL_TIME);
-    run.distance += (before + run.speed) * 0.5 * dt;
+    run.speed = speedAt(run.time);
+    run.distance = distanceAt(run.time);
     run.cycles = activeRoute ? 0 : Math.floor(run.distance / CIRCUIT_LENGTH);
 }
 export function steer(deltaPixels: number): number {
     const before = run.x;
-    const half = (run.width - CRAFT_WIDTH) / 2;
-    const dx = (deltaPixels * (ROAD_WIDTH - CRAFT_WIDTH)) / (0.5 * game.screen.width);
+    const half = craftLimit(run.width);
+    const dx = (deltaPixels * (ROAD_WIDTH - 2 * CRAFT_BODY.halfWidth)) / (0.5 * game.screen.width);
     run.x = Math.max(-half, Math.min(half, before + dx));
     if (Math.abs(run.x - before) > 0.001) run.hint = false;
     return run.x - before;
 }
-export function openRoad() {
+export function openRoad(withTraffic = false) {
     const night = activeMap === 'night';
     if (night && seed === undefined) seed = crypto.getRandomValues(new Uint32Array(1))[0];
     const route = night ? makeRoute(seed!, mode) : undefined;
     activeRoute = route;
+    const trafficSeed = withTraffic ? (trafficSeedOverride ?? game.rng.int(0, 0xffffffff)) : null;
     Object.assign(run, {
         time: 0,
         distance: 0,
@@ -109,6 +115,11 @@ export function openRoad() {
         angle: 0,
         width: ROAD_WIDTH,
         fragments: 0,
+        trafficSeed,
+        traffic: 0,
+        trafficGap: null,
+        trafficSpeeds: [],
+        safePassage: [],
         objects: 0,
         allocated: 0,
         meshSlots: 0,
@@ -124,8 +135,9 @@ export function openRoad() {
     game.rig.yaw = Math.PI;
     game.rig.distance = CAMERA_DISTANCE;
     game.rig.focus(0, 1, -CAMERA_LOOK_AHEAD);
-    const drawNight = route ? buildNightCity(route) : undefined;
-    const drawDay = night ? undefined : buildHighway();
+    const traffic = trafficSeed === null ? undefined : buildTraffic(trafficSeed, night, ROAD_WIDTH);
+    const drawNight = route ? buildNightCity(route, traffic) : undefined;
+    const drawDay = night ? undefined : buildHighway(traffic);
     const vehicle = spawnVehicle(night);
     let cameraX = 0,
         clock = 0;
@@ -143,8 +155,8 @@ export function openRoad() {
             run.section = here.sectionId;
             run.angle = (route.sectionFor(run.distance).road.angle * 180) / Math.PI;
             game.rig.yaw = Math.PI + ahead.heading - here.heading;
-        } else if (drawDay) run.sections = drawDay(run.distance);
-        const half = (run.width - CRAFT_WIDTH) / 2;
+        } else if (drawDay) Object.assign(run, drawDay(run.distance, run.time));
+        const half = craftLimit(run.width);
         run.x = Math.max(-half, Math.min(half, run.x));
         const desired = run.x * 0.91;
         cameraX += (desired - cameraX) * (1 - Math.exp(-CAMERA_LAG * dt));
@@ -152,7 +164,7 @@ export function openRoad() {
         cameraX = Math.max(run.x - 1.45, Math.min(run.x + 1.45, cameraX));
         game.rig.focus(cameraX, 1, -CAMERA_LOOK_AHEAD);
         if (drawNight && route) {
-            Object.assign(run, drawNight(run.distance));
+            Object.assign(run, drawNight(run.distance, run.time));
             run.generated = route.created;
             run.fallbacks = route.fallbacks;
         }

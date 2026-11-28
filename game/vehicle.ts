@@ -1,12 +1,12 @@
+import { CRAFT_BODY } from './drive-profile.js';
 import { game } from './engine.js';
 
-export const CRAFT_WIDTH = 2;
 const HOVER = 0.58;
 const BANK_LIMIT = 0.19;
 const EXHAUST_Y = -0.222;
 const NIGHT_EXHAUST_ALPHA = 0.36;
 export function spawnVehicle(night: boolean) {
-    const craft = game.modelFiles.spawn('kestrel', { id: 'craft', size: 4.13, y: HOVER });
+    const craft = game.modelFiles.spawn('kestrel', { id: 'craft', size: CRAFT_BODY.halfLength * 2, y: HOVER });
     const exhausts = [-1, 1].map((side) => {
         const x = side * 0.56;
         const obj = game.spawn({
